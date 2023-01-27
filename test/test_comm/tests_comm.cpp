@@ -1,0 +1,209 @@
+#include "tests_comm.h"
+#include "transaction.pb.h"
+
+uint8_t sendBuffer[192] = {0};
+uint8_t sendBufferIndex = 0;
+uint8_t recvBuffer[64] = {0};
+
+// External interfaces
+FastCRC32 CRC32;
+
+// Class under test
+TestComm com;
+
+void setup_test()
+{
+  com.testReset();
+}
+
+void run_tests()
+{
+  UNITY_BEGIN(); // IMPORTANT LINE!
+  RUN_TEST(test_single_incoming_frame);
+  RUN_TEST(test_multiple_incoming_frame);
+  RUN_TEST(test_multiple_unique_incoming_frame);
+  RUN_TEST(test_single_outgoing_single_frame);
+  RUN_TEST(test_single_outgoing_multiple_frame);
+  UNITY_END(); // stop unit testing
+}
+
+void test_single_incoming_frame(void)
+{
+  setup_test();
+  
+  Frame frame1;
+  frame1.preamble = Preamble::DATA;
+  frame1.destinationAddress = 0x00;
+  frame1.sourceAddress = 0x01; // pretend to be PC
+  frame1.frameTotal = 1;
+  frame1.frameOrder = 1;
+  frame1.frameID = 0xDEADBEEF;
+  memset(frame1.payload, 0x7F, sizeof(Frame::payload));
+  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(Frame)-4);
+
+  com.initilise();
+
+  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(Frame));
+  com.testProcessRead();
+  com.testProcessIncomingMessage();
+  auto frames = com.getInFrames();
+  TEST_ASSERT_EQUAL(0, frames.size());
+
+  auto buffer = com.getBuffer();
+  TEST_ASSERT_EQUAL(sizeof(Frame::payload), buffer.inIndex);
+}
+
+void test_multiple_incoming_frame(void)
+{
+  setup_test();
+
+  Frame frame1;
+  frame1.preamble = Preamble::DATA;
+  frame1.destinationAddress = 0x00;
+  frame1.sourceAddress = 0x01; // pretend to be PC
+  frame1.frameTotal = 2;
+  frame1.frameOrder = 1;
+  frame1.frameID = 0xDEADBEEF;
+  memset(frame1.payload, 0x7F, sizeof(Frame::payload));
+  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(Frame)-4);
+
+  Frame frame2;
+  frame2.preamble = Preamble::DATA;
+  frame2.destinationAddress = 0x00;
+  frame2.sourceAddress = 0x01; // pretend to be PC
+  frame2.frameTotal = 2;
+  frame2.frameOrder = 2;
+  frame2.frameID = 0xDEADBEEF;
+  memset(frame2.payload, 0x80, sizeof(Frame::payload));
+  frame2.crc = CRC32.crc32((uint8_t*)&frame2, sizeof(Frame)-4);
+
+  com.initilise();
+
+  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(Frame));
+  com.testProcessRead();
+  com.testProcessIncomingMessage();
+  auto frames1 = com.getInFrames();
+  TEST_ASSERT_EQUAL(1, frames1.size()); // should only be 1 unique id
+  auto first1 = frames1.begin();
+  TEST_ASSERT_EQUAL(0xDEADBEEF,first1->first); // id should match
+  auto first1Frames = first1->second;
+  TEST_ASSERT_EQUAL(1, first1Frames.size()); // only 1 frame for the id at this time
+
+  auto buffer1 = com.getBuffer();
+  TEST_ASSERT_EQUAL(0, buffer1.inIndex);
+
+  memcpy(recvBuffer, (uint8_t*)&frame2, sizeof(Frame));
+  com.testProcessRead();
+  com.testProcessIncomingMessage();
+  auto frames2 = com.getInFrames();
+  TEST_ASSERT_EQUAL(0, frames2.size()); // should only be 0 since we had enough frames to process successfully
+
+  auto buffer2 = com.getBuffer();
+  TEST_ASSERT_EQUAL(100, buffer2.inIndex);
+  for(uint8_t i = 0; i < sizeof(Frame::payload); i++){
+    TEST_ASSERT_EQUAL(0x7F, buffer2.inBuffer[i]);
+  }
+  for(uint8_t i = sizeof(Frame::payload); i < sizeof(Frame::payload)*2; i++){
+    TEST_ASSERT_EQUAL(0x80, buffer2.inBuffer[i]);
+  }
+
+}
+
+void test_multiple_unique_incoming_frame(void)
+{
+  setup_test();
+
+  Frame frame1;
+  frame1.preamble = Preamble::DATA;
+  frame1.destinationAddress = 0x00;
+  frame1.sourceAddress = 0x01; // pretend to be PC
+  frame1.frameTotal = 2;
+  frame1.frameOrder = 1;
+  frame1.frameID = 0xDEADBEE0;
+  memset(frame1.payload, 0x7F, sizeof(Frame::payload));
+  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(Frame)-4);
+
+  Frame frame2;
+  frame2.preamble = Preamble::DATA;
+  frame2.destinationAddress = 0x00;
+  frame2.sourceAddress = 0x01; // pretend to be PC
+  frame2.frameTotal = 2;
+  frame2.frameOrder = 2;
+  frame2.frameID = 0xDEADBEE1;
+  memset(frame2.payload, 0x80, sizeof(Frame::payload));
+  frame2.crc = CRC32.crc32((uint8_t*)&frame2, sizeof(Frame)-4);
+
+  com.initilise();
+
+  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(Frame));
+  com.testProcessRead();
+  com.testProcessIncomingMessage();
+  auto frames1 = com.getInFrames();
+  TEST_ASSERT_EQUAL(1, frames1.size()); // should only be 1 unique id
+
+  memcpy(recvBuffer, (uint8_t*)&frame2, sizeof(Frame));
+  com.testProcessRead();
+  com.testProcessIncomingMessage();
+  auto frames2 = com.getInFrames();
+  TEST_ASSERT_EQUAL(2, frames2.size()); // should only be 0 since we had enough frames to process successfully\
+
+}
+
+void test_single_outgoing_single_frame(void)
+{
+  setup_test();
+
+  Buffer buffer;
+  memset(buffer.outBuffer, 0x7F, sizeof(Frame::payload));
+  buffer.outMessageLength = sizeof(Frame::payload);
+
+  com.setBuffer(buffer);
+  com.testProcessOutgoingMessage();
+  com.testProcessWrite();
+
+  Frame frame;
+  memcpy(&frame, sendBuffer, sizeof(Frame));
+
+  for(uint8_t i = 0; i < sizeof(Frame::payload); i++){
+    TEST_ASSERT_EQUAL(0x7F, frame.payload[i]);
+  }
+
+}
+
+void test_single_outgoing_multiple_frame(void)
+{
+  setup_test();
+
+  Buffer buffer;
+  memset(buffer.outBuffer, 0x7F, TransactionMessage_size);
+  buffer.outMessageLength = TransactionMessage_size;
+
+  com.setBuffer(buffer);
+  com.testProcessOutgoingMessage();
+  com.testProcessWrite();
+
+  Frame frame1;
+  memcpy(&frame1, sendBuffer, sizeof(Frame));
+
+  Frame frame2;
+  memcpy(&frame2, sendBuffer+(sizeof(Frame)*1), sizeof(Frame));
+
+
+  for(uint8_t i = 0; i < sizeof(Frame::payload); i++){
+    TEST_ASSERT_EQUAL(0x7F, frame1.payload[i]);
+  }
+  
+  for(uint8_t i = 0; i < TransactionMessage_size % sizeof(Frame::payload); i++){
+    TEST_ASSERT_EQUAL(0x7F, frame2.payload[i]);
+  }
+
+}
+
+void setUp (void) {}
+
+void tearDown (void) {}
+
+int main(int argc, char **argv) {
+  run_tests();
+  return 0;
+}
