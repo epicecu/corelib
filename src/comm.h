@@ -174,7 +174,7 @@ protected:
             return ProcessState::ERROR;
         }
         // share id between frames for the message
-        uint32_t frameId = random(0, UINT32_MAX);
+        uint32_t frameId = random();
         for(uint8_t i = 0; i < requiredFrames; i++){
             // Send out the message over `requiredFrames` times
             Frame frame;
@@ -248,7 +248,7 @@ protected:
             }
         }else if(frame.preamble == Preamble::PROGRAMMOR_COMPATIBLE_REQUEST){
             // Save frames to the outFrames
-            uint32_t frameId = random(0, UINT32_MAX);
+            uint32_t frameId = random();
             Frame frameResponse = frame; // copy over frame
             frameResponse.preamble = Preamble::PROGRAMMOR_COMPATIBLE_RESPONSE;
             frameResponse.sourceAddress = frame.destinationAddress;
