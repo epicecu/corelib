@@ -24,6 +24,7 @@ void run_tests()
   RUN_TEST(test_multiple_unique_incoming_frame);
   RUN_TEST(test_single_outgoing_single_frame);
   RUN_TEST(test_single_outgoing_multiple_frame);
+  RUN_TEST(test_message_callback);
   UNITY_END(); // stop unit testing
 }
 
@@ -106,7 +107,6 @@ void test_multiple_incoming_frame(void)
   for(uint8_t i = sizeof(Frame::payload); i < sizeof(Frame::payload)*2; i++){
     TEST_ASSERT_EQUAL(0x80, buffer2.inBuffer[i]);
   }
-
 }
 
 void test_multiple_unique_incoming_frame(void)
@@ -145,8 +145,7 @@ void test_multiple_unique_incoming_frame(void)
   com.testProcessRead();
   com.testProcessIncomingMessage();
   auto frames2 = com.getInFrames();
-  TEST_ASSERT_EQUAL(2, frames2.size()); // should only be 0 since we had enough frames to process successfully\
-
+  TEST_ASSERT_EQUAL(2, frames2.size()); // should only be 0 since we had enough frames to process successfully
 }
 
 void test_single_outgoing_single_frame(void)
@@ -167,7 +166,6 @@ void test_single_outgoing_single_frame(void)
   for(uint8_t i = 0; i < sizeof(Frame::payload); i++){
     TEST_ASSERT_EQUAL(0x7F, frame.payload[i]);
   }
-
 }
 
 void test_single_outgoing_multiple_frame(void)
@@ -192,11 +190,36 @@ void test_single_outgoing_multiple_frame(void)
   for(uint8_t i = 0; i < sizeof(Frame::payload); i++){
     TEST_ASSERT_EQUAL(0x7F, frame1.payload[i]);
   }
-  
+
   for(uint8_t i = 0; i < TransactionMessage_size % sizeof(Frame::payload); i++){
     TEST_ASSERT_EQUAL(0x7F, frame2.payload[i]);
   }
+}
 
+void test_message_callback(void)
+{
+  setup_test();
+
+  Buffer buffer;
+
+  // Test data
+  memset(buffer.inBuffer, 0x7F, sizeof(Frame::payload));
+  buffer.inMessageLength = sizeof(Frame::payload);
+
+  // test the request message
+  auto fn = [](Buffer* i){ 
+    TEST_ASSERT_EQUAL(sizeof(Frame::payload), i->inMessageLength);
+    i->outMessageLength = 0x99; // Check that this value has changed
+    return HandleMessageState::OK;
+  };
+
+  com.setHandleMessageCallback(fn);
+
+  // Test that the callback function is called
+  com.testCallback(&buffer);
+
+  // Check value has changed from within the lamda function
+  TEST_ASSERT_EQUAL(0x99, buffer.outMessageLength);
 }
 
 void setUp (void) {}

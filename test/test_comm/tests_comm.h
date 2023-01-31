@@ -39,6 +39,10 @@ class TestComm : public Comm
       processOutgoingMessage();
     }
 
+    HandleMessageState testCallback(Buffer* b) {
+      return callback(b);
+    }
+
     auto getBuffer(){
       return buffer;
     }
@@ -87,3 +91,4 @@ void test_multiple_incoming_frame(void);
 void test_multiple_unique_incoming_frame(void);
 void test_single_outgoing_single_frame(void);
 void test_single_outgoing_multiple_frame(void);
+void test_message_callback(void);

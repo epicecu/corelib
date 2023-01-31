@@ -68,6 +68,14 @@ public:
         initilised = false;
     }
 
+    /**
+     * @brief Register a callback function which will be invoked after incomeing 
+     * data is ready for processing.
+     */
+    void setHandleMessageCallback(etl::delegate<HandleMessageState(Buffer*)> fn) {
+        callbackFunction = fn;
+    }
+
 protected:
     // @brief Incoming/Outgoing Message Buffer
     Buffer buffer;
@@ -87,14 +95,6 @@ protected:
     
     // Callback function
     etl::delegate<HandleMessageState(Buffer*)> callbackFunction;
-
-    /**
-     * @brief Register a callback function which will be invoked after incomeing 
-     * data is ready for processing.
-     */
-    void setHandleMessageCallback(etl::delegate<HandleMessageState(Buffer*)> fn) {
-        callbackFunction = fn;
-    }
 
     /**
      * @brief A callback function which Handles the incoming message, and 
