@@ -32,55 +32,55 @@ void test_single_incoming_frame(void)
 {
   setup_test();
   
-  Frame frame1;
-  frame1.preamble = Preamble::DATA;
+  corelib::Frame frame1;
+  frame1.preamble = corelib::Preamble::DATA;
   frame1.destinationAddress = 0x00;
   frame1.sourceAddress = 0x01; // pretend to be PC
   frame1.frameTotal = 1;
   frame1.frameOrder = 1;
   frame1.frameID = 0xDEADBEEF;
-  memset(frame1.payload, 0x7F, sizeof(Frame::payload));
-  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(Frame)-4);
+  memset(frame1.payload, 0x7F, sizeof(corelib::Frame::payload));
+  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(corelib::Frame)-4);
 
   com.initilise();
 
-  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(Frame));
+  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(corelib::Frame));
   com.testProcessRead();
   com.testProcessIncomingMessage();
   auto frames = com.getInFrames();
   TEST_ASSERT_EQUAL(0, frames.size());
 
   auto buffer = com.getBuffer();
-  TEST_ASSERT_EQUAL(sizeof(Frame::payload), buffer.inIndex);
+  TEST_ASSERT_EQUAL(sizeof(corelib::Frame::payload), buffer.inIndex);
 }
 
 void test_multiple_incoming_frame(void)
 {
   setup_test();
 
-  Frame frame1;
-  frame1.preamble = Preamble::DATA;
+  corelib::Frame frame1;
+  frame1.preamble = corelib::Preamble::DATA;
   frame1.destinationAddress = 0x00;
   frame1.sourceAddress = 0x01; // pretend to be PC
   frame1.frameTotal = 2;
   frame1.frameOrder = 1;
   frame1.frameID = 0xDEADBEEF;
-  memset(frame1.payload, 0x7F, sizeof(Frame::payload));
-  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(Frame)-4);
+  memset(frame1.payload, 0x7F, sizeof(corelib::Frame::payload));
+  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(corelib::Frame)-4);
 
-  Frame frame2;
-  frame2.preamble = Preamble::DATA;
+  corelib::Frame frame2;
+  frame2.preamble = corelib::Preamble::DATA;
   frame2.destinationAddress = 0x00;
   frame2.sourceAddress = 0x01; // pretend to be PC
   frame2.frameTotal = 2;
   frame2.frameOrder = 2;
   frame2.frameID = 0xDEADBEEF;
-  memset(frame2.payload, 0x80, sizeof(Frame::payload));
-  frame2.crc = CRC32.crc32((uint8_t*)&frame2, sizeof(Frame)-4);
+  memset(frame2.payload, 0x80, sizeof(corelib::Frame::payload));
+  frame2.crc = CRC32.crc32((uint8_t*)&frame2, sizeof(corelib::Frame)-4);
 
   com.initilise();
 
-  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(Frame));
+  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(corelib::Frame));
   com.testProcessRead();
   com.testProcessIncomingMessage();
   auto frames1 = com.getInFrames();
@@ -93,7 +93,7 @@ void test_multiple_incoming_frame(void)
   auto buffer1 = com.getBuffer();
   TEST_ASSERT_EQUAL(0, buffer1.inIndex);
 
-  memcpy(recvBuffer, (uint8_t*)&frame2, sizeof(Frame));
+  memcpy(recvBuffer, (uint8_t*)&frame2, sizeof(corelib::Frame));
   com.testProcessRead();
   com.testProcessIncomingMessage();
   auto frames2 = com.getInFrames();
@@ -101,10 +101,10 @@ void test_multiple_incoming_frame(void)
 
   auto buffer2 = com.getBuffer();
   TEST_ASSERT_EQUAL(100, buffer2.inIndex);
-  for(uint8_t i = 0; i < sizeof(Frame::payload); i++){
+  for(uint8_t i = 0; i < sizeof(corelib::Frame::payload); i++){
     TEST_ASSERT_EQUAL(0x7F, buffer2.inBuffer[i]);
   }
-  for(uint8_t i = sizeof(Frame::payload); i < sizeof(Frame::payload)*2; i++){
+  for(uint8_t i = sizeof(corelib::Frame::payload); i < sizeof(corelib::Frame::payload)*2; i++){
     TEST_ASSERT_EQUAL(0x80, buffer2.inBuffer[i]);
   }
 }
@@ -113,35 +113,35 @@ void test_multiple_unique_incoming_frame(void)
 {
   setup_test();
 
-  Frame frame1;
-  frame1.preamble = Preamble::DATA;
+  corelib::Frame frame1;
+  frame1.preamble = corelib::Preamble::DATA;
   frame1.destinationAddress = 0x00;
   frame1.sourceAddress = 0x01; // pretend to be PC
   frame1.frameTotal = 2;
   frame1.frameOrder = 1;
   frame1.frameID = 0xDEADBEE0;
-  memset(frame1.payload, 0x7F, sizeof(Frame::payload));
-  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(Frame)-4);
+  memset(frame1.payload, 0x7F, sizeof(corelib::Frame::payload));
+  frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(corelib::Frame)-4);
 
-  Frame frame2;
-  frame2.preamble = Preamble::DATA;
+  corelib::Frame frame2;
+  frame2.preamble = corelib::Preamble::DATA;
   frame2.destinationAddress = 0x00;
   frame2.sourceAddress = 0x01; // pretend to be PC
   frame2.frameTotal = 2;
   frame2.frameOrder = 2;
   frame2.frameID = 0xDEADBEE1;
-  memset(frame2.payload, 0x80, sizeof(Frame::payload));
-  frame2.crc = CRC32.crc32((uint8_t*)&frame2, sizeof(Frame)-4);
+  memset(frame2.payload, 0x80, sizeof(corelib::Frame::payload));
+  frame2.crc = CRC32.crc32((uint8_t*)&frame2, sizeof(corelib::Frame)-4);
 
   com.initilise();
 
-  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(Frame));
+  memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(corelib::Frame));
   com.testProcessRead();
   com.testProcessIncomingMessage();
   auto frames1 = com.getInFrames();
   TEST_ASSERT_EQUAL(1, frames1.size()); // should only be 1 unique id
 
-  memcpy(recvBuffer, (uint8_t*)&frame2, sizeof(Frame));
+  memcpy(recvBuffer, (uint8_t*)&frame2, sizeof(corelib::Frame));
   com.testProcessRead();
   com.testProcessIncomingMessage();
   auto frames2 = com.getInFrames();
@@ -152,18 +152,18 @@ void test_single_outgoing_single_frame(void)
 {
   setup_test();
 
-  Buffer buffer;
-  memset(buffer.outBuffer, 0x7F, sizeof(Frame::payload));
-  buffer.outMessageLength = sizeof(Frame::payload);
+  corelib::Buffer buffer;
+  memset(buffer.outBuffer, 0x7F, sizeof(corelib::Frame::payload));
+  buffer.outMessageLength = sizeof(corelib::Frame::payload);
 
   com.setBuffer(buffer);
   com.testProcessOutgoingMessage();
   com.testProcessWrite();
 
-  Frame frame;
-  memcpy(&frame, sendBuffer, sizeof(Frame));
+  corelib::Frame frame;
+  memcpy(&frame, sendBuffer, sizeof(corelib::Frame));
 
-  for(uint8_t i = 0; i < sizeof(Frame::payload); i++){
+  for(uint8_t i = 0; i < sizeof(corelib::Frame::payload); i++){
     TEST_ASSERT_EQUAL(0x7F, frame.payload[i]);
   }
 }
@@ -172,7 +172,7 @@ void test_single_outgoing_multiple_frame(void)
 {
   setup_test();
 
-  Buffer buffer;
+  corelib::Buffer buffer;
   memset(buffer.outBuffer, 0x7F, TransactionMessage_size);
   buffer.outMessageLength = TransactionMessage_size;
 
@@ -180,18 +180,18 @@ void test_single_outgoing_multiple_frame(void)
   com.testProcessOutgoingMessage();
   com.testProcessWrite();
 
-  Frame frame1;
-  memcpy(&frame1, sendBuffer, sizeof(Frame));
+  corelib::Frame frame1;
+  memcpy(&frame1, sendBuffer, sizeof(corelib::Frame));
 
-  Frame frame2;
-  memcpy(&frame2, sendBuffer+(sizeof(Frame)*1), sizeof(Frame));
+  corelib::Frame frame2;
+  memcpy(&frame2, sendBuffer+(sizeof(corelib::Frame)*1), sizeof(corelib::Frame));
 
 
-  for(uint8_t i = 0; i < sizeof(Frame::payload); i++){
+  for(uint8_t i = 0; i < sizeof(corelib::Frame::payload); i++){
     TEST_ASSERT_EQUAL(0x7F, frame1.payload[i]);
   }
 
-  for(uint8_t i = 0; i < TransactionMessage_size % sizeof(Frame::payload); i++){
+  for(uint8_t i = 0; i < TransactionMessage_size % sizeof(corelib::Frame::payload); i++){
     TEST_ASSERT_EQUAL(0x7F, frame2.payload[i]);
   }
 }
@@ -200,17 +200,17 @@ void test_message_callback(void)
 {
   setup_test();
 
-  Buffer buffer;
+  corelib::Buffer buffer;
 
   // Test data
-  memset(buffer.inBuffer, 0x7F, sizeof(Frame::payload));
-  buffer.inMessageLength = sizeof(Frame::payload);
+  memset(buffer.inBuffer, 0x7F, sizeof(corelib::Frame::payload));
+  buffer.inMessageLength = sizeof(corelib::Frame::payload);
 
   // test the request message
-  auto fn = [](Buffer* i){ 
-    TEST_ASSERT_EQUAL(sizeof(Frame::payload), i->inMessageLength);
+  auto fn = [](corelib::Buffer* i){ 
+    TEST_ASSERT_EQUAL(sizeof(corelib::Frame::payload), i->inMessageLength);
     i->outMessageLength = 0x99; // Check that this value has changed
-    return HandleMessageState::OK;
+    return corelib::HandleMessageState::OK;
   };
 
   com.setHandleMessageCallback(fn);

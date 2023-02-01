@@ -16,10 +16,10 @@ extern uint8_t sendBuffer[192];
 extern uint8_t sendBufferIndex;
 extern uint8_t recvBuffer[64];
 
-class TestComm : public Comm
+class TestComm : public corelib::Comm
 {
   public:
-    TestComm() : Comm() {
+    TestComm() : corelib::Comm() {
       // do nothing
     }
 
@@ -39,7 +39,7 @@ class TestComm : public Comm
       processOutgoingMessage();
     }
 
-    HandleMessageState testCallback(Buffer* b) {
+    corelib::HandleMessageState testCallback(corelib::Buffer* b) {
       return callback(b);
     }
 
@@ -47,7 +47,7 @@ class TestComm : public Comm
       return buffer;
     }
 
-    void setBuffer(Buffer b){
+    void setBuffer(corelib::Buffer b){
       buffer = b;
     } 
 
