@@ -18,10 +18,14 @@ enum class Preamble : uint16_t {
 
 
 /**
- * The Automotive Frame Protocol(AFP) - struct Frame; is a 64 byte frame to use 
- * over USB HID, Canbus FD or Ethernet to communicate between Epic devices and 
- * tuning software. The device will automatically perform packet forwarding if
- * supported.
+ * The Frame; is a 64 byte sized wrapper to use over USB, Canbus or Ethernet. It
+ * allows for large data to be transfered as the data can be split to a payload 
+ * size and serlised detailing the frame order, total and identity. The data
+ * integrety is kept by performing a crc check and comparing the calculated 
+ * value to the stored value.
+ * 
+ * The frame can also be used to handshake between devices using the preamble 
+ * property.
  * 
  * The `preamble` states the protocol of the packet. The MSB must be zero (0).
  *  Null = 0x00

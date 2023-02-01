@@ -50,20 +50,10 @@ protected:
 
     // Comms.h interface
     bool read(uint8_t* buffer) {
-        if(usb_rawhid_recv(buffer, 1) > 0) {
-            // Serial.println("Frame Received");
-            return true;
-        }else{
-            return false;
-        }
+        return (usb_rawhid_recv(buffer, 1) > 0);
     }
     bool write(const uint8_t* buffer){
-        if(usb_rawhid_send(buffer, 1) > 0) {
-            // Serial.println("Frame Sent");
-            return true;
-        }else{
-            return false;
-        }
+        return (usb_rawhid_send(buffer, 1) > 0);
     }
 };
 
