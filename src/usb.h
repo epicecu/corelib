@@ -3,6 +3,8 @@
 
 #include "comm.h"
 
+namespace corelib {
+
 #if defined (NATIVE)
 /**
  * @brief Native Unit Test Helpers
@@ -56,5 +58,5 @@ protected:
         return (usb_rawhid_send(buffer, 1) > 0);
     }
 };
-
-#endif
+} // NAMESPACE
+#endif // USB_H

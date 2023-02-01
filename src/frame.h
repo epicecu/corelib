@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 
+namespace corelib {
+
 /**
  * @brief Frame Preamble
  */
@@ -68,4 +70,5 @@ struct Frame {
     uint8_t payload[50] = {0};
     uint32_t crc;
 };
+} // NAMESPACE
 #endif // FRAME_H

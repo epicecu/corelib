@@ -1,6 +1,8 @@
 #ifndef FUNCTION_H
 #define FUNCTION_H
 
+namespace corelib {
+
 /**
  * Function
  * @brief Funciton base class
@@ -26,5 +28,5 @@ protected:
     virtual void performIterate() = 0;
 
 };
-
+} // NAMESPACE
 #endif // FUNCTION_H

@@ -14,6 +14,7 @@
 
 #define NUMBER_FRAME_SETS 3
 
+namespace corelib {
 
 struct Buffer {
     // In data
@@ -328,5 +329,5 @@ protected:
     }
 
 };
-
+} // NAMESPACE
 #endif // COMMS_H
