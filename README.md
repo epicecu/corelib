@@ -16,6 +16,9 @@ Libraries
 - Usb.h - USB-HID communications implementation
 - Frame.h - Communications data wrapper and protocol
 
+Protobuf
+- Transaction.proto - Transaction message and common1 message
+
 ## Documentation
 To be complete..
 
