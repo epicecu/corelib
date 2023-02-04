@@ -1,5 +1,5 @@
-#ifndef COMMS_H
-#define COMMS_H
+#ifndef COMM_H
+#define COMM_H
 
 #include <Arduino.h>
 #include "function.h"
@@ -330,4 +330,4 @@ protected:
 
 };
 } // NAMESPACE
-#endif // COMMS_H
+#endif // COMM_H
