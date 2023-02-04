@@ -37,7 +37,9 @@ public:
     /**
      * @brief Construct a new USB object
      */
-    USB();
+    USB(){
+        // do nothing
+    }
 
 protected:
     // Function.h interface
