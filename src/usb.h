@@ -28,7 +28,7 @@ static int usb_rawhid_recv(void *buffer, uint32_t timeout)
 #endif
 
 /**
- * @brief USB (RAW-HID mode) - Comms Implementation 
+ * @brief USB (RAW-HID mode) - Comms Implementation
  * 
  */
 class USB : public Comm {

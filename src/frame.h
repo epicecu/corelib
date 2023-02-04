@@ -20,14 +20,13 @@ enum class Preamble : uint16_t {
 
 
 /**
- * The Frame; is a 64 byte sized wrapper to use over USB, Canbus or Ethernet. It
- * allows for large data to be transfered as the data can be split to a payload 
- * size and serlised detailing the frame order, total and identity. The data
- * integrety is kept by performing a crc check and comparing the calculated 
- * value to the stored value.
- * 
- * The frame can also be used to handshake between devices using the preamble 
- * property.
+ * The Frame is a 64-byte wrapper designed for use over USB, CANbus, or 
+ * Ethernet. It enables efficient transfer of large data by dividing it 
+ * into payloads of specified size and serializing it, with information 
+ * on the frame order, total number of frames, and identity. Data integrity 
+ * is ensured through a cyclic redundancy check (CRC) that verifies the 
+ * stored value against the calculated one. Additionally, the frame's 
+ * preamble property allows for device handshake communication.
  * 
  * The `preamble` states the protocol of the packet. The MSB must be zero (0).
  *  Null = 0x00
