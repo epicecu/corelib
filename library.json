@@ -1,0 +1,38 @@
+{
+    "name": "Corelib",
+    "version": "1.0.0",
+    "description": "Corelib is an open source building block for embedded Teensy projects compatible with the Programmor tuning software",
+    "keywords": "epicecu, programmor, corelib, arduino",
+    "repository":
+    {
+      "type": "git",
+      "url": "https://github.com/epicecu/corelib.git"
+    },
+    "authors":
+    [
+      {
+        "name": "David Cedar",
+        "email": "david@epicecu.com",
+        "url": "https://epicecu.com"
+      }
+    ],
+    "dependencies": {
+      "EEPROM": "*",
+      "Nanopb": "*",
+      "Time": "*",
+      "external-repo": "https://github.com/epicecu/FastCRC.git",
+      "etlcpp/Embedded Template Library": "^20.32.1"
+    },
+    "export": {
+      "include": [
+        "protobuf"
+      ]
+    },
+    "build": {
+      "extraScript": "protobuf/add_files_env.py"
+    },
+    "license": "GPL2",
+    "homepage": "https://epicecu.com",
+    "frameworks": "Arduino",
+    "platforms": "*"
+  }

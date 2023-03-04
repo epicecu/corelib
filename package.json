@@ -1,0 +1,28 @@
+{
+  "name": "corelib",
+  "version": "1.0.0",
+  "description": "Corelib is an open source building block for embedded Teensy projects compatible with the Programmor tuning software",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/epicecu/corelib.git"
+  },
+  "keywords": [
+    "programmor", "epicecu", "core", "library"
+  ],
+  "author": "David Cedar",
+  "license": "GPL-2.0",
+  "bugs": {
+    "url": "https://github.com/epicecu/corelib/issues"
+  },
+  "homepage": "https://github.com/epicecu/corelib#readme",
+  "files": [
+    "protobuf/transaction.proto"
+  ]
+}
