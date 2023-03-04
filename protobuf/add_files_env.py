@@ -1,17 +1,19 @@
 import os
 Import("env")
 
-protobuf_folder = os.path.join(os.getcwd(), '.')
+protobuf_folder = os.path.join(os.getcwd())
+protobuf_transaction_file = f"{protobuf_folder}/transaction.proto"
+protobuf_transaction_options_file = f"{protobuf_folder}/transaction.options"
+project_dir = env.subst("$PROJECT_DIR")
 
-env["custom_nanopb_protos"] = f" +<{protobuf_folder}/*.proto>"
-env["custom_nanopb_options"] = f" --error-on-unmatched"
+try:
+    os.symlink(protobuf_transaction_file, f"{project_dir}/protobuf/transaction.proto")
+    print("Symlink created for transactions.proto file")
+except FileExistsError:
+    print("Symlink already exits for transactions.proto file")
 
-# global_env = DefaultEnvironment()
-
-# global_env.Append(
-#     custom_nanopb_protos=f"+<{protobuf_folder}/*.proto>"
-# )
-
-# global_env.Append(
-#     custom_nanopb_options=f"--error-on-unmatched"
-# )
+try:
+    os.symlink(protobuf_transaction_options_file, f"{project_dir}/protobuf/transaction.options")
+    print("Symlink created for transactions.options file")
+except FileExistsError:
+    print("Symlink already exits transactions.options file")
