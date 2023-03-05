@@ -29,7 +29,7 @@
       ]
     },
     "build": {
-      "extraScript": "protobuf/add_files_env.py"
+      "extraScript": "protobuf/create_symbolic_link.py"
     },
     "license": "GPL2",
     "homepage": "https://epicecu.com",
