@@ -43,13 +43,13 @@ public:
 
 protected:
     // Function.h interface
-    void performInitilise() {
+    void performInitialise() {
         // initialise the serial communication:
         #if defined (STM32)
-        // todo: Do we need to initilise the hid interface?
+        // todo: Do we need to initialise the hid interface?
         //Serial.begin(board->serialUSBSpeed); // Teensy does not require begin to be called, serial starts automatically at maximum speed.
         #endif
-        initilised = true;
+        initialised = true;
     }
 
     // Comms.h interface

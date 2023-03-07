@@ -1,5 +1,5 @@
 /**
- * @file tests_commns.h
+ * @file tests_comm.h
  *
  * @brief Tests the Comms proto implementation. The unit tests do not cover every share message
  * but rather the main functions including the request and publish modes.
@@ -65,8 +65,8 @@ class TestComm : public corelib::Comm
 
   protected:
     // Function.h interface
-    void performInitilise(){
-      initilised = true;
+    void performInitialise(){
+      initialised = true;
     };
     void performIterate(){
       // do nothing

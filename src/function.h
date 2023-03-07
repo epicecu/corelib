@@ -5,13 +5,13 @@ namespace corelib {
 
 /**
  * Function
- * @brief Funciton base class
+ * @brief Function base class
  */
 class Function{
 public:
     /// Called during setup 
-    void initilise() {
-        this->performInitilise();
+    void initialise() {
+        this->performInitialise();
     }
 
     /// Called by the main loop
@@ -22,7 +22,7 @@ public:
 
 protected:
     /// Called during setup
-    virtual void performInitilise() = 0;
+    virtual void performInitialise() = 0;
 
     /// Called every x Hz selected by setting the variable
     virtual void performIterate() = 0;

@@ -66,11 +66,11 @@ public:
      * 
      */
     Comm(): CRC32(), inFrames(), outFrames() {
-        initilised = false;
+        initialised = false;
     }
 
     /**
-     * @brief Register a callback function which will be invoked after incomeing 
+     * @brief Register a callback function which will be invoked after incoming 
      * data is ready for processing.
      */
     void setHandleMessageCallback(etl::delegate<HandleMessageState(Buffer*)> fn) {
@@ -80,8 +80,8 @@ public:
 protected:
     // @brief Incoming/Outgoing Message Buffer
     Buffer buffer;
-    // @brief Set when the Comms Interface is initilised
-    bool initilised;
+    // @brief Set when the Comms Interface is initialised
+    bool initialised;
     // @brief The CRC Interface
     FastCRC32 CRC32;
     // @brief This Device's Address
@@ -313,7 +313,7 @@ protected:
 
     // Function.h
     void performIterate() {
-        if(!initilised) {
+        if(!initialised) {
             return;
         }
         // Read an individual frame

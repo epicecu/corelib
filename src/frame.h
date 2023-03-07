@@ -50,7 +50,7 @@ enum class Preamble : uint16_t {
  * The `frameOrder` denotes the order of a packet to a create a complete
  * message.
  * 
- * The `frameTotal` denotes the total amount of packets requied to complete
+ * The `frameTotal` denotes the total amount of packets required to complete
  * a message.
  * 
  * The `payload` includes the part or whole of the message data up to 47 bytes

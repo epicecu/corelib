@@ -42,7 +42,7 @@ void test_single_incoming_frame(void)
   memset(frame1.payload, 0x7F, sizeof(corelib::Frame::payload));
   frame1.crc = CRC32.crc32((uint8_t*)&frame1, sizeof(corelib::Frame)-4);
 
-  com.initilise();
+  com.initialise();
 
   memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(corelib::Frame));
   com.testProcessRead();
@@ -78,7 +78,7 @@ void test_multiple_incoming_frame(void)
   memset(frame2.payload, 0x80, sizeof(corelib::Frame::payload));
   frame2.crc = CRC32.crc32((uint8_t*)&frame2, sizeof(corelib::Frame)-4);
 
-  com.initilise();
+  com.initialise();
 
   memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(corelib::Frame));
   com.testProcessRead();
@@ -133,7 +133,7 @@ void test_multiple_unique_incoming_frame(void)
   memset(frame2.payload, 0x80, sizeof(corelib::Frame::payload));
   frame2.crc = CRC32.crc32((uint8_t*)&frame2, sizeof(corelib::Frame)-4);
 
-  com.initilise();
+  com.initialise();
 
   memcpy(recvBuffer, (uint8_t*)&frame1, sizeof(corelib::Frame));
   com.testProcessRead();
@@ -218,7 +218,7 @@ void test_message_callback(void)
   // Test that the callback function is called
   com.testCallback(&buffer);
 
-  // Check value has changed from within the lamda function
+  // Check value has changed from within the lambda function
   TEST_ASSERT_EQUAL(0x99, buffer.outMessageLength);
 }
 
