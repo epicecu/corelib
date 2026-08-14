@@ -1,0 +1,38 @@
+@PACKAGE_INIT@
+include("${CMAKE_CURRENT_LIST_DIR}/CorelibTargets.cmake")
+
+set(Corelib_Cpp_FOUND FALSE)
+set(Corelib_Gateway_FOUND FALSE)
+set(Corelib_GatewayCpp_FOUND FALSE)
+if("Gateway" IN_LIST Corelib_FIND_COMPONENTS AND
+   TARGET Corelib::Gateway)
+  set(Corelib_Gateway_FOUND TRUE)
+endif()
+if("Cpp" IN_LIST Corelib_FIND_COMPONENTS)
+  if(TARGET Corelib::DeviceCpp)
+    find_path(Corelib_ETL_INCLUDE_DIR etl/span.h
+      HINTS "$ENV{ETL_ROOT}/include" "$ENV{ETL_ROOT}/src"
+    )
+    if(Corelib_ETL_INCLUDE_DIR)
+      set_property(TARGET Corelib::DeviceCpp APPEND PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${Corelib_ETL_INCLUDE_DIR}"
+      )
+      set(Corelib_Cpp_FOUND TRUE)
+    endif()
+  endif()
+endif()
+if("GatewayCpp" IN_LIST Corelib_FIND_COMPONENTS)
+  if(TARGET Corelib::GatewayCpp)
+    find_path(Corelib_ETL_INCLUDE_DIR etl/span.h
+      HINTS "$ENV{ETL_ROOT}/include" "$ENV{ETL_ROOT}/src"
+    )
+    if(Corelib_ETL_INCLUDE_DIR)
+      set_property(TARGET Corelib::DeviceCpp APPEND PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${Corelib_ETL_INCLUDE_DIR}")
+      set_property(TARGET Corelib::GatewayCpp APPEND PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${Corelib_ETL_INCLUDE_DIR}")
+      set(Corelib_GatewayCpp_FOUND TRUE)
+    endif()
+  endif()
+endif()
+check_required_components(Corelib)

@@ -1,43 +1,11 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
+/build/
+/.cache/
 *.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
 *.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# code workspace
-*.code-workspace
-
-__pycache__
-
-venv
-.pio
-.vscode
-
-temp/
+*.elf
+*.hex
+*.bin
+__pycache__/
+*.pyc
+.pio/
+/programmor-documentation-repo

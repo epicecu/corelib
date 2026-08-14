@@ -1,0 +1,93 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+includes:
+  native:
+    taskfile: ./tasks/native.yml
+    flatten: true
+    dir: .
+  protocol:
+    taskfile: ./tasks/protocol.yml
+    flatten: true
+    dir: .
+  packages:
+    taskfile: ./tasks/packages.yml
+    flatten: true
+    dir: .
+  arduino:
+    taskfile: ./tasks/arduino.yml
+    flatten: true
+    dir: .
+  hardware:
+    taskfile: ./tasks/hardware.yml
+    flatten: true
+    dir: .
+  quality:
+    taskfile: ./tasks/quality.yml
+    flatten: true
+    dir: .
+
+vars:
+  BUILD_DIR: '{{default "build" .BUILD_DIR}}'
+  CC: '{{default "cc" .CC}}'
+  CXX: '{{default "c++" .CXX}}'
+  PYTHON: '{{default "python3" .PYTHON}}'
+  ARDUINO_CLI: '{{default "build/tooling/arduino-cli" .ARDUINO_CLI}}'
+  ARDUINO_LINT: '{{default "arduino-lint" .ARDUINO_LINT}}'
+
+env:
+  ARDUINO_DIRECTORIES_DATA: '{{.ROOT_DIR}}/build/tooling/arduino/data'
+  ARDUINO_DIRECTORIES_DOWNLOADS: '{{.ROOT_DIR}}/build/tooling/arduino/downloads'
+  ARDUINO_DIRECTORIES_USER: '{{.ROOT_DIR}}/build/tooling/arduino/user'
+
+tasks:
+  default:
+    cmds:
+      - task: quick
+
+  setup:
+    desc: Verify required native development tools
+    cmds:
+      - cmake --version
+      - '{{.CC}} --version'
+      - '{{.CXX}} --version'
+      - ctest --version
+
+  quick:
+    desc: Configure, build, and test the portable Corelib
+    cmds:
+      - task: native:test
+
+  test:
+    desc: Run the native Corelib test suite
+    cmds:
+      - task: native:test
+
+  check:
+    desc: Build with strict GCC and Clang warnings
+    cmds:
+      - task: native:check
+
+  all:
+    desc: Run the complete software release gate
+    cmds:
+      - task: quality:format-check
+      - task: quality:docs
+      - task: native:check
+      - task: native:test
+      - task: native:conformance
+      - task: native:sanitize
+      - task: protocol:check
+      - task: quality:heap
+      - task: quality:no-gateway
+      - task: package:cmake
+      - task: package:arduino
+      - task: arduino:check
+      - task: teensy:build
+      - task: stm32:build
+      - task: quality:fuzz
+
+  clean:
+    desc: Remove generated build output
+    cmds:
+      - cmake -E remove_directory build

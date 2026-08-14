@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+tasks:
+  native:etl:
+    desc: Install the pinned ETL headers for native C++ validation
+    cmds:
+      - cmake -E make_directory build/tooling
+      - curl -fL https://github.com/ETLCPP/etl/archive/refs/tags/20.48.1.tar.gz -o /tmp/corelib-etl-20.48.1.tar.gz
+      - cmake -E tar xzf /tmp/corelib-etl-20.48.1.tar.gz
+      - cmake -E rename etl-20.48.1 build/tooling/etl
+    status:
+      - test -f build/tooling/etl/include/etl/span.h
+
+  native:configure:
+    desc: Configure native validation
+    deps: [native:etl]
+    cmds:
+      - cmake -S . -B {{.BUILD_DIR}} -DCMAKE_C_COMPILER={{.CC}} -DCMAKE_CXX_COMPILER={{.CXX}} -DCORELIB_ETL_ROOT={{.ROOT_DIR}}/build/tooling/etl -DCORELIB_BUILD_TESTS=ON -DCORELIB_BUILD_CPP=ON -DCORELIB_BUILD_GATEWAY=ON -DCORELIB_BUILD_EXAMPLES=ON
+
+  native:build:
+    desc: Build native validation targets
+    deps: [native:configure]
+    cmds:
+      - cmake --build {{.BUILD_DIR}} --parallel
+
+  native:test:
+    desc: Run native unit, conformance, and consumer tests
+    deps: [native:build]
+    cmds:
+      - ctest --test-dir {{.BUILD_DIR}} --output-on-failure
+      - '{{.ROOT_DIR}}/{{.BUILD_DIR}}/corelib_device_consumer'
+
+  native:unit:
+    desc: Run GoogleTest device and gateway unit tests
+    deps: [native:build]
+    cmds:
+      - ctest --test-dir {{.BUILD_DIR}} --output-on-failure -L unit
+
+  native:runtime:
+    desc: Run framework-free C11 and C++14 runtime tests
+    deps: [native:build]
+    cmds:
+      - ctest --test-dir {{.BUILD_DIR}} --output-on-failure -L runtime
+
+  native:check:
+    desc: Build with strict GCC and Clang warnings
+    deps: [native:etl]
+    cmds:
+      - cmake -S . -B build/check-gcc -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCORELIB_ETL_ROOT={{.ROOT_DIR}}/build/tooling/etl -DCORELIB_WARNINGS_AS_ERRORS=ON -DCORELIB_BUILD_TESTS=ON -DCORELIB_BUILD_CPP=ON -DCORELIB_BUILD_GATEWAY=ON -DCORELIB_BUILD_EXAMPLES=ON
+      - cmake --build build/check-gcc --parallel
+      - cmake -S . -B build/check-clang -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCORELIB_ETL_ROOT={{.ROOT_DIR}}/build/tooling/etl -DCORELIB_WARNINGS_AS_ERRORS=ON -DCORELIB_BUILD_TESTS=ON -DCORELIB_BUILD_CPP=ON -DCORELIB_BUILD_GATEWAY=ON -DCORELIB_BUILD_EXAMPLES=ON
+      - cmake --build build/check-clang --parallel
+
+  native:sanitize:
+    desc: Run native tests with address and undefined-behaviour sanitizers
+    deps: [native:etl]
+    cmds:
+      - cmake -S . -B build/sanitize -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCORELIB_ETL_ROOT={{.ROOT_DIR}}/build/tooling/etl -DCORELIB_BUILD_TESTS=ON -DCORELIB_BUILD_CPP=ON -DCORELIB_BUILD_GATEWAY=ON -DCORELIB_ENABLE_SANITIZERS=ON
+      - cmake --build build/sanitize --parallel
+      - ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build/sanitize --output-on-failure
+
+  native:conformance:
+    desc: Run byte-level protocol conformance tests
+    deps: [native:build]
+    cmds:
+      - ctest --test-dir {{.BUILD_DIR}} --output-on-failure -L conformance

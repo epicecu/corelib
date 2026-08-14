@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "name": "Teensy 4.1 RawHID device end-to-end",
+  "adapter": {
+    "package": "hid-adapter",
+    "args": ["--insecure", "--dev", "--port", "0"]
+  },
+  "tests": {
+    "challenge": {
+      "response": {"name": "auth.challenge", "data": {"processInstanceId": {"$capture": "process_id", "match": "uuid4"}, "serverNonce": {"$capture": "server_nonce", "match": "base64url32"}}}
+    },
+    "authenticate": {
+      "send": {"type": "request", "name": "auth.authenticate", "id": {"$generate": "uuid4", "as": "auth_id"}, "data": {"processInstanceId": {"$ref": "process_id"}, "supportedVersions": ["1.0"], "serverNonce": {"$ref": "server_nonce"}, "clientNonce": {"$generate": "base64url32"}, "clientProof": {"$authProof": "client"}}},
+      "response": {"name": "auth.authenticate", "id": {"$ref": "auth_id"}, "data": {"serverProof": {"$authProof": "server"}}}
+    },
+    "hello": {
+      "send": {"type": "request", "name": "protocol.hello", "id": {"$generate": "uuid4", "as": "hello_id"}, "data": {"appVersion": "0.1.0-teensy-test", "adapterConfiguration": {"supportedDevices": [{"vendorId": 5824, "productId": 1158, "usagePage": 65451, "usage": 512}]}}},
+      "response": [{"name": "protocol.hello", "id": {"$ref": "hello_id"}, "data": {"connectionMethods": ["usb-hid"]}}, {"name": "adapter.ready"}]
+    },
+    "discover-and-connect": {
+      "send": {"type": "request", "name": "discovery.start", "id": {"$generate": "uuid4", "as": "discovery_id"}, "data": {"match": [{"connectionMethod": "usb-hid", "vendorId": 5824, "productId": 1158}], "continuous": false, "establishTopology": true}},
+      "response": [{"name": "discovery.start", "id": {"$ref": "discovery_id"}, "data": {"devices": [{"connectionMethod": "usb-hid", "vendorId": 5824, "productId": 1158}]}}, {"name": "node.added", "data": {"nodeId": {"$capture": "node_id", "match": "uuid4"}, "connectionId": {"$capture": "connection_id", "match": "uuid4"}, "address": 2}}],
+      "receiveTimeoutMs": 5000
+    },
+    "request-common": {
+      "send": {"type": "request", "name": "message.request", "id": {"$generate": "uuid4", "as": "common_request_id"}, "data": {"nodeId": {"$ref": "node_id"}, "kind": "common", "shareId": 1, "timeoutMs": 1000}},
+      "response": [{"name": "message.request", "id": {"$ref": "common_request_id"}}, {"name": "message.received", "data": {"nodeId": {"$ref": "node_id"}, "kind": "common", "shareId": 1, "result": "success", "correlationStatus": "matched", "payload": "DQIAAAAV6QMAAB17AAAAJQEAAAAtRBYDADINVGVzdCBEZXZpY2UgQQ", "checksum": "550c33790d2e2291f3aba23a2be29a4a5eb2e1649cd40e49acf43645806d6100"}}]
+    },
+    "request-share-four": {
+      "send": {"type": "request", "name": "message.request", "id": {"$generate": "uuid4", "as": "share_request_id"}, "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 4, "timeoutMs": 1000}},
+      "response": [{"name": "message.request", "id": {"$ref": "share_request_id"}}, {"name": "message.received", "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 4, "result": "success", "payload": "CgxIZWxsbyB0aGVyZSE", "checksum": "bddae6c2f31135a590f45bddc496064f765ca027d2bdbe08ea3d0963dc70eaa8"}}]
+    },
+    "publish-share-four": {
+      "send": {"type": "request", "name": "message.publish", "id": {"$generate": "uuid4", "as": "publish_id"}, "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 4, "timeoutMs": 1000, "payload": "CgxQaWNvIHVwZGF0ZWQ", "checksum": "568f3051b300be56bd6218c5bcd6cd3cfc1fbb99af157d1cd420049b3264f82b"}},
+      "response": {"name": "message.publish", "id": {"$ref": "publish_id"}}
+    },
+    "verify-share-four": {
+      "send": {"type": "request", "name": "message.request", "id": {"$generate": "uuid4", "as": "verify_id"}, "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 4, "timeoutMs": 1000}},
+      "response": [{"name": "message.request", "id": {"$ref": "verify_id"}}, {"name": "message.received", "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 4, "result": "success", "payload": "CgxQaWNvIHVwZGF0ZWQ", "checksum": "568f3051b300be56bd6218c5bcd6cd3cfc1fbb99af157d1cd420049b3264f82b"}}]
+    },
+    "unknown-share": {
+      "send": {"type": "request", "name": "message.request", "id": {"$generate": "uuid4", "as": "unknown_id"}, "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 99, "timeoutMs": 1000}},
+      "response": [{"name": "message.request", "id": {"$ref": "unknown_id"}}, {"name": "message.received", "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 99, "result": "unsupported", "correlationStatus": "matched"}}]
+    },
+    "subscribe-counter": {
+      "send": {"type": "request", "name": "subscription.set", "id": {"$generate": "uuid4", "as": "subscription_request_id"}, "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 1, "intervalMs": 100, "responseTimeoutMs": 1000}},
+      "response": [{"name": "subscription.set", "id": {"$ref": "subscription_request_id"}, "data": {"subscriptionId": {"$capture": "subscription_id", "match": "uuid4"}}}, {"name": "message.received", "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 1, "result": "success", "correlationStatus": "matched"}}]
+    },
+    "clear-counter": {
+      "send": {"type": "request", "name": "subscription.clear", "id": {"$generate": "uuid4", "as": "clear_id"}, "data": {"subscriptionId": {"$ref": "subscription_id"}}},
+      "response": {"name": "subscription.clear", "id": {"$ref": "clear_id"}}
+    },
+    "disconnect": {
+      "send": {"type": "request", "name": "connection.disconnect", "id": {"$generate": "uuid4", "as": "disconnect_id"}, "data": {"connectionId": {"$ref": "connection_id"}, "reason": "Teensy hardware test complete"}},
+      "response": [{"name": "connection.disconnect", "id": {"$ref": "disconnect_id"}, "data": {"state": "disconnected"}}, {"name": "node.removed", "data": {"nodeId": {"$ref": "node_id"}}}, {"name": "connection.changed", "data": {"connectionId": {"$ref": "connection_id"}, "state": "disconnected"}}]
+    }
+  }
+}

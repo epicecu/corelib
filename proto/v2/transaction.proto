@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package epicecu.programmor.transaction.v2;
+
+message TransactionMessage {
+  uint32 protocol_version = 1;
+  fixed32 token = 2;
+  Action action = 3;
+  fixed32 share_id = 4;
+  bytes data = 5;
+  Result result = 6;
+
+  enum Action {
+    UNSPECIFIED = 0;
+    COMMON_REQUEST = 1;
+    COMMON_PUBLISH = 2;
+    COMMON_RESPONSE = 3;
+    SHARE_REQUEST = 4;
+    SHARE_PUBLISH = 5;
+    SHARE_RESPONSE = 6;
+  }
+
+  enum Result {
+    NO_RESULT = 0;
+    SUCCESS = 1;
+    UNSUPPORTED = 2;
+    BUSY = 3;
+    INVALID_REQUEST = 4;
+    INTERNAL_ERROR = 5;
+  }
+}

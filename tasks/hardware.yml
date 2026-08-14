@@ -1,0 +1,165 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+tasks:
+  stm32:build:
+    desc: Build and validate the linked NUCLEO-F446RE firmware fixture
+    requires:
+      vars: [STM32CUBE_F4_PATH]
+    preconditions:
+      - sh: test -f "{{.STM32CUBE_F4_PATH}}/Drivers/CMSIS/Device/ST/STM32F4xx/Source/Templates/gcc/startup_stm32f446xx.s"
+        msg: STM32CUBE_F4_PATH must identify an STM32CubeF4 1.28.1 checkout
+      - sh: command -v arm-none-eabi-gcc
+        msg: The Arm GNU toolchain must be installed
+    cmds:
+      - cmake -S tests/hardware/stm32f446re -B "{{.STM32_BUILD_DIR}}" -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake -DSTM32CUBE_F4_PATH="{{.STM32CUBE_F4_PATH}}" -DCMAKE_BUILD_TYPE=Release
+      - cmake --build "{{.STM32_BUILD_DIR}}" --parallel
+      - cmake -DNM=arm-none-eabi-nm -DELF="{{.STM32_BUILD_DIR}}/corelib_stm32f446re.elf" -P tests/hardware/stm32f446re/cmake/check_firmware.cmake
+    vars:
+      STM32_BUILD_DIR: '{{default "/tmp/corelib-stm32f446re-build" .STM32_BUILD_DIR}}'
+
+  pico:proto:
+    desc: Regenerate the bounded Pico test-device protobuf sources
+    cmds:
+      - >-
+        PYTHONDONTWRITEBYTECODE=1 python3
+        tools/nanopb/generator/nanopb_generator.py
+        -I tests/hardware/pico-hid/proto
+        -D tests/hardware/pico-hid/src/generated
+        -f tests/hardware/pico-hid/proto/common.options
+        -L '#include "vendor/nanopb/%s"'
+        --error-on-unmatched
+        tests/hardware/pico-hid/proto/common.proto
+      - >-
+        PYTHONDONTWRITEBYTECODE=1 python3
+        tools/nanopb/generator/nanopb_generator.py
+        -I tests/hardware/pico-hid/proto
+        -D tests/hardware/pico-hid/src/generated
+        -f tests/hardware/pico-hid/proto/shares.options
+        -L '#include "vendor/nanopb/%s"'
+        --error-on-unmatched
+        tests/hardware/pico-hid/proto/shares.proto
+
+  pico:build:
+    desc: Build the RP2040 HID test-device UF2 with the native Pico SDK
+    requires:
+      vars: [PICO_SDK_PATH]
+    cmds:
+      - PICO_SDK_PATH="{{.PICO_SDK_PATH}}" cmake -S tests/hardware/pico-hid -B "{{.PICO_BUILD_DIR}}" -DCMAKE_BUILD_TYPE=Release
+      - cmake --build "{{.PICO_BUILD_DIR}}" --parallel
+    preconditions:
+      - sh: test -f "{{.PICO_SDK_PATH}}/external/pico_sdk_import.cmake"
+        msg: PICO_SDK_PATH must identify a Raspberry Pi Pico SDK checkout
+    vars:
+      PICO_BUILD_DIR: '{{default "/tmp/corelib-pico-hid-build" .PICO_BUILD_DIR}}'
+
+  pico:flash:
+    desc: Copy the Pico HID test-device UF2 to a validated BOOTSEL volume
+    deps: [pico:build]
+    requires:
+      vars: [PICO_UF2_MOUNT]
+    preconditions:
+      - sh: test -f "{{.PICO_UF2_MOUNT}}/INFO_UF2.TXT"
+        msg: PICO_UF2_MOUNT must identify a mounted Pico BOOTSEL volume
+      - sh: 'grep -q ''^Board-ID: RPI-RP2$'' "{{.PICO_UF2_MOUNT}}/INFO_UF2.TXT"'
+        msg: The selected volume is not an original RP2040 Pico BOOTSEL volume
+    cmds:
+      - cmake -E copy "{{.PICO_BUILD_DIR}}/corelib_pico_hid.uf2" "{{.PICO_UF2_MOUNT}}/corelib-pico-hid.uf2"
+    vars:
+      PICO_BUILD_DIR: '{{default "/tmp/corelib-pico-hid-build" .PICO_BUILD_DIR}}'
+
+  pico:e2e:
+    desc: Run the physical Pico through the external HID adapter harness
+    requires:
+      vars: [PROGRAMMOR_ADAPTERS_DIR]
+    preconditions:
+      - sh: test -f "{{.PROGRAMMOR_ADAPTERS_DIR}}/tests/test-client/Taskfile.yml"
+        msg: PROGRAMMOR_ADAPTERS_DIR must identify a Programmor adapters checkout
+    cmds:
+      - task --dir "{{.PROGRAMMOR_ADAPTERS_DIR}}/tests/test-client" run MANIFEST="{{.ROOT_DIR}}/tests/hardware/pico-hid/adapter-e2e.json"
+
+  teensy:build:
+    desc: Build the Teensy 4.1 RawHID test-device firmware
+    deps: [teensy:setup]
+    preconditions:
+      - sh: command -v {{.ARDUINO_CLI}}
+        msg: Arduino CLI 1.5.1 and teensy:avr@1.62.0 are required
+    cmds:
+      - cmake -E compare_files tests/hardware/pico-hid/src/test_device.h tests/hardware/teensy41-rawhid/src/test_device.h
+      - cmake -E compare_files tests/hardware/pico-hid/src/test_device.c tests/hardware/teensy41-rawhid/src/test_device.c
+      - cmake -E compare_files tests/hardware/pico-hid/src/corelib_self_test.h tests/hardware/teensy41-rawhid/src/corelib_self_test.h
+      - cmake -E compare_files tests/hardware/pico-hid/src/corelib_self_test.c tests/hardware/teensy41-rawhid/src/corelib_self_test.c
+      - cmake -E compare_files tests/hardware/pico-hid/src/generated/common.pb.h tests/hardware/teensy41-rawhid/src/generated/common.pb.h
+      - cmake -E compare_files tests/hardware/pico-hid/src/generated/common.pb.c tests/hardware/teensy41-rawhid/src/generated/common.pb.c
+      - cmake -E compare_files tests/hardware/pico-hid/src/generated/shares.pb.h tests/hardware/teensy41-rawhid/src/generated/shares.pb.h
+      - cmake -E compare_files tests/hardware/pico-hid/src/generated/shares.pb.c tests/hardware/teensy41-rawhid/src/generated/shares.pb.c
+      - '{{.ARDUINO_CLI}} compile --fqbn teensy:avr:teensy41:usb=rawhid --library "{{.ROOT_DIR}}" --library "{{.ROOT_DIR}}/build/tooling/arduino/user/libraries/Embedded_Template_Library_ETL" --build-path "{{.TEENSY_BUILD_DIR}}" tests/hardware/teensy41-rawhid'
+    vars:
+      TEENSY_BUILD_DIR: '{{default "build/hardware/teensy41" .TEENSY_BUILD_DIR}}'
+
+  teensy:setup:
+    desc: Install the pinned local Arduino CLI, Teensy board core, and ETL
+    deps: [arduino:setup-cli]
+    cmds:
+      - '{{.ARDUINO_CLI}} core update-index --additional-urls {{.TEENSY_INDEX_URL}}'
+      - '{{.ARDUINO_CLI}} core install teensy:avr@1.62.0 --additional-urls {{.TEENSY_INDEX_URL}}'
+      - '{{.ARDUINO_CLI}} lib install "Embedded Template Library ETL@20.48.1"'
+    status:
+      - '{{.ARDUINO_CLI}} core list | grep -q ''^teensy:avr[[:space:]]\+1.62.0'''
+      - '{{.ARDUINO_CLI}} lib list | grep -q ''^Embedded Template Library ETL[[:space:]]\+20.48.1'''
+    vars:
+      TEENSY_INDEX_URL: https://www.pjrc.com/teensy/package_teensy_index.json
+
+  teensy:upload:
+    desc: Upload the RawHID test-device firmware to a Teensy 4.1
+    deps: [teensy:build]
+    preconditions:
+      - sh: command -v {{.TEENSY_LOADER_CLI}}
+        msg: teensy_loader_cli must be installed
+    cmds:
+      - '{{.TEENSY_LOADER_CLI}} --mcu=TEENSY41 -s -w -v "{{.TEENSY_BUILD_DIR}}/teensy41-rawhid.ino.hex"'
+    vars:
+      TEENSY_BUILD_DIR: '{{default "build/hardware/teensy41" .TEENSY_BUILD_DIR}}'
+      TEENSY_LOADER_CLI: '{{default "teensy_loader_cli" .TEENSY_LOADER_CLI}}'
+
+  teensy:e2e:
+    desc: Run the physical Teensy 4.1 through the external HID adapter harness
+    requires:
+      vars: [PROGRAMMOR_ADAPTERS_DIR]
+    preconditions:
+      - sh: test -f "{{.PROGRAMMOR_ADAPTERS_DIR}}/tests/test-client/Taskfile.yml"
+        msg: PROGRAMMOR_ADAPTERS_DIR must identify a Programmor adapters checkout
+    cmds:
+      - cmd: echo "Teensy E2E | starting HID adapter and locating Teensyduino RawHID (16c0:0486)"
+        silent: true
+      - cmd: echo "Teensy E2E | checking PFP discovery, address assignment, Common/Share requests and publish"
+        silent: true
+      - cmd: echo "Teensy E2E | checking subscription delivery, graceful disconnect and topology removal"
+        silent: true
+      - task --dir "{{.PROGRAMMOR_ADAPTERS_DIR}}/tests/test-client" run MANIFEST="{{.ROOT_DIR}}/tests/hardware/teensy41-rawhid/adapter-e2e.json"
+      - cmd: echo "Teensy E2E | all physical-device checks passed"
+        silent: true
+
+  teensy:wait:
+    desc: Wait for a programmed Teensy 4.1 to enumerate after upload
+    deps: [teensy:setup]
+    cmds:
+      - >-
+        for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15;
+        do
+          if {{.ARDUINO_CLI}} board list | grep -q 'teensy:avr:teensy41';
+          then exit 0;
+          fi;
+          sleep 1;
+        done;
+        echo 'Teensy 4.1 did not enumerate within 15 seconds' >&2;
+        exit 1
+
+  teensy:test:
+    desc: Build, upload, wait for, and fully test the physical Teensy 4.1
+    requires:
+      vars: [PROGRAMMOR_ADAPTERS_DIR]
+    cmds:
+      - task: teensy:upload
+      - task: teensy:wait
+      - task: teensy:e2e

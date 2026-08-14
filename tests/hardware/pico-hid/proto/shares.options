@@ -1,0 +1,3 @@
+epicecu.programmor.test_device.v1.Share4.welcome_text max_size:64
+epicecu.programmor.test_device.v1.Share5.ip_address max_size:40
+epicecu.programmor.test_device.v1.Share5.date_time max_size:32

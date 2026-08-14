@@ -1,0 +1,17 @@
+Device	KEYWORD1
+Handler	KEYWORD1
+Config	KEYWORD1
+init	KEYWORD2
+isReady	KEYWORD2
+receive	KEYWORD2
+tick	KEYWORD2
+addLink	KEYWORD2
+removeLink	KEYWORD2
+respond	KEYWORD2
+publish	KEYWORD2
+reset	KEYWORD2
+corelib_init	KEYWORD2
+corelib_receive_frame	KEYWORD2
+corelib_tick	KEYWORD2
+corelib_respond	KEYWORD2
+corelib_publish	KEYWORD2

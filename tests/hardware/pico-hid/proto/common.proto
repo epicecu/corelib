@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package epicecu.programmor.test_device.v1;
+
+message Common1 {
+  fixed32 id = 1;
+  fixed32 registry_id = 2;
+  fixed32 serial_number = 3;
+  fixed32 shares_version = 4;
+  fixed32 firmware_version = 5;
+  string device_name = 6;
+}

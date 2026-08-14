@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+vars:
+  CLANG_FORMAT: '{{default "build/tooling/clang-format-18/usr/bin/clang-format-18" .CLANG_FORMAT}}'
+  DOXYGEN: '{{default "doxygen" .DOXYGEN}}'
+  GCOVR: '{{default "gcovr" .GCOVR}}'
+
+tasks:
+  quality:format-setup:
+    desc: Provision pinned ClangFormat 18 locally when it is not installed
+    cmds:
+      - cmake -DROOT={{.ROOT_DIR}} -DOUTPUT={{.ROOT_DIR}}/build/tooling/clang-format-18 -P cmake/setup_clang_format.cmake
+    status:
+      - '{{.CLANG_FORMAT}} --version | grep -q ''version 18\.'''
+
+  quality:format:
+    desc: Format owned Corelib and example sources with pinned ClangFormat 18
+    deps: [quality:format-setup]
+    cmds:
+      - '{{.PYTHON}} tools/check_signatures.py --fix'
+      - cmake -DROOT={{.ROOT_DIR}} -DCLANG_FORMAT={{.CLANG_FORMAT}} -DMODE=APPLY -P cmake/format_owned.cmake
+
+  quality:format-check:
+    desc: Verify owned source formatting and one-line function signatures
+    deps: [quality:format-setup]
+    cmds:
+      - cmake -DROOT={{.ROOT_DIR}} -DCLANG_FORMAT={{.CLANG_FORMAT}} -DMODE=CHECK -P cmake/format_owned.cmake
+      - '{{.PYTHON}} tools/check_signatures.py'
+
+  quality:heap:
+    desc: Verify that the portable core does not reference heap allocators
+    deps: [native:build]
+    cmds:
+      - cmake -DNM=nm -DLIBRARY={{.ROOT_DIR}}/{{.BUILD_DIR}}/libcorelib_device.a -P cmake/check_heap.cmake
+      - cmake -DNM=nm -DLIBRARY={{.ROOT_DIR}}/{{.BUILD_DIR}}/libcorelib_gateway.a -P cmake/check_heap.cmake
+
+  quality:no-gateway:
+    desc: Verify the standard-only library contains no gateway implementation
+    cmds:
+      - cmake -S . -B build/no-gateway -DCORELIB_BUILD_GATEWAY=OFF
+      - cmake --build build/no-gateway --parallel
+      - cmake -DNM=nm -DLIBRARY={{.ROOT_DIR}}/build/no-gateway/libcorelib_device.a -P cmake/check_no_gateway.cmake
+
+  quality:docs:
+    desc: Build public API documentation and lint all owned symbol comments
+    cmds:
+      - cmake -E make_directory build/docs/api build/docs/lint
+      - '{{.DOXYGEN}} docs/Doxyfile'
+      - '{{.DOXYGEN}} docs/Doxyfile.lint'
+    preconditions:
+      - sh: command -v {{.DOXYGEN}}
+        msg: Doxygen must be installed to build API documentation
+
+  quality:fuzz:
+    desc: Build fuzz targets with Clang
+    cmds:
+      - cmake -S . -B build/fuzz -DCMAKE_C_COMPILER=clang -DCORELIB_BUILD_FUZZERS=ON -DCORELIB_BUILD_GATEWAY=ON
+      - cmake --build build/fuzz --parallel
+
+  quality:coverage:
+    desc: Generate native Corelib line and branch coverage reports
+    deps: [native:configure]
+    cmds:
+      - cmake -E remove_directory build/coverage
+      - cmake -S . -B build/coverage -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST={{.ROOT_DIR}}/build/_deps/googletest-src -DCORELIB_ETL_ROOT={{.ROOT_DIR}}/build/tooling/etl -DCORELIB_BUILD_TESTS=ON -DCORELIB_BUILD_CPP=ON -DCORELIB_BUILD_GATEWAY=ON -DCORELIB_BUILD_EXAMPLES=ON -DCORELIB_ENABLE_COVERAGE=ON
+      - cmake --build build/coverage --parallel
+      - ctest --test-dir build/coverage --output-on-failure
+      - '{{.ROOT_DIR}}/build/coverage/corelib_device_consumer'
+      - cmake -E make_directory build/coverage/report
+      - '{{.GCOVR}} --root . build/coverage --filter src/corelib/ --filter src/protocol/ --exclude src/protocol/v2/generated/ --exclude src/vendor/ --txt build/coverage/report/coverage.txt --html-details build/coverage/report/index.html --xml build/coverage/report/coverage.xml --xml-pretty --print-summary --fail-under-line 85'
+    preconditions:
+      - sh: command -v {{.GCOVR}}
+        msg: gcovr must be installed to generate code coverage reports

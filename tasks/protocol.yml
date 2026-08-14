@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+tasks:
+  protocol:check:
+    desc: Verify the normative schema and deterministic generated sources
+    cmds:
+      - cmake -DROOT={{.ROOT_DIR}} -DPYTHON={{.PYTHON}} -P cmake/check_proto.cmake
+
+  protocol:regen:
+    desc: Regenerate TransactionMessage sources with the pinned Nanopb generator
+    cmds:
+      - >-
+        PYTHONDONTWRITEBYTECODE=1 {{.PYTHON}}
+        tools/nanopb/generator/nanopb_generator.py
+        -I proto/v2
+        -D src/protocol/v2/generated
+        -f proto/v2/transaction.options
+        -L '#include "vendor/nanopb/%s"'
+        --error-on-unmatched
+        proto/v2/transaction.proto

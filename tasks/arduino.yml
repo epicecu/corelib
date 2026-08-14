@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+tasks:
+  arduino:setup-cli:
+    desc: Install the pinned Arduino CLI into the local build directory
+    cmds:
+      - cmake -E make_directory build/tooling/arduino-cli-download
+      - curl -fL https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Linux_64bit.tar.gz -o build/tooling/arduino-cli-download/arduino-cli.tar.gz
+      - tar -xzf build/tooling/arduino-cli-download/arduino-cli.tar.gz -C build/tooling/arduino-cli-download arduino-cli
+      - cmake -E copy build/tooling/arduino-cli-download/arduino-cli build/tooling/arduino-cli
+    status:
+      - test -x build/tooling/arduino-cli
+      - 'build/tooling/arduino-cli version | grep -q "Version: 1.5.1"'
+    preconditions:
+      - sh: command -v curl
+        msg: curl is required to bootstrap Arduino CLI
+      - sh: command -v tar
+        msg: tar is required to bootstrap Arduino CLI
+
+  arduino:setup:
+    desc: Install the pinned Arduino board cores used by compile validation
+    deps: [arduino:setup-cli]
+    cmds:
+      - '{{.ARDUINO_CLI}} core update-index --additional-urls {{.TEENSY_INDEX_URL}}'
+      - '{{.ARDUINO_CLI}} core install arduino:mbed_nano@4.6.0'
+      - '{{.ARDUINO_CLI}} core install teensy:avr@1.62.0 --additional-urls {{.TEENSY_INDEX_URL}}'
+      - '{{.ARDUINO_CLI}} lib install "Embedded Template Library ETL@20.48.1"'
+    preconditions:
+      - sh: command -v {{.ARDUINO_CLI}}
+        msg: Arduino CLI 1.5.1 must be installed for Arduino compile checks
+      - sh: '{{.ARDUINO_CLI}} version | grep -q "Version: 1.5.1"'
+        msg: Arduino CLI 1.5.1 is required for reproducible compile checks
+    vars:
+      TEENSY_INDEX_URL: https://www.pjrc.com/teensy/package_teensy_index.json
+    status:
+      - '{{.ARDUINO_CLI}} core list | grep -q ''^arduino:mbed_nano[[:space:]]\+4.6.0'''
+      - '{{.ARDUINO_CLI}} core list | grep -q ''^teensy:avr[[:space:]]\+1.62.0'''
+      - '{{.ARDUINO_CLI}} lib list | grep -q ''^Embedded Template Library ETL[[:space:]]\+20.48.1'''
+
+  arduino:check:
+    desc: Compile all Arduino examples against pinned board cores
+    deps: [arduino:setup]
+    cmds:
+      - '{{.ARDUINO_CLI}} compile --fqbn arduino:mbed_nano:nanorp2040connect --library "{{.ROOT_DIR}}" --library "{{.ROOT_DIR}}/build/tooling/arduino/user/libraries/Embedded_Template_Library_ETL" --build-path /tmp/corelib-device-serial-build examples/DeviceSerial'
+      - '{{.ARDUINO_CLI}} compile --fqbn teensy:avr:teensy41:usb=rawhid --library "{{.ROOT_DIR}}" --library "{{.ROOT_DIR}}/build/tooling/arduino/user/libraries/Embedded_Template_Library_ETL" --build-path /tmp/corelib-device-rawhid-build examples/DeviceTeensyRawHID'
+      - '{{.ARDUINO_CLI}} compile --fqbn arduino:mbed_nano:nanorp2040connect --library "{{.ROOT_DIR}}" --library "{{.ROOT_DIR}}/build/tooling/arduino/user/libraries/Embedded_Template_Library_ETL" --build-path /tmp/corelib-gateway-integration-build examples/GatewayIntegration'

@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y clang-format-18 doxygen
+      - run: task quality:format-check
+      - run: task quality:docs
+
+  native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: gcc
+            cxx: g++
+          - cc: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - run: task native:test CC=${{ matrix.cc }} CXX=${{ matrix.cxx }}
+
+  protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m venv build/protocol-venv
+      - run: build/protocol-venv/bin/pip install -r tools/nanopb/requirements.txt
+      - run: task protocol:check PYTHON=${{ github.workspace }}/build/protocol-venv/bin/python3
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - run: task native:sanitize
+
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - run: task package:cmake
+      - run: task quality:heap
+      - run: cmake -DROOT=${{ github.workspace }} -DOUTPUT=${{ runner.temp }}/epicecu-corelib-arduino -P cmake/stage_arduino.cmake
+      - uses: arduino/arduino-lint-action@v3
+        with:
+          path: ${{ runner.temp }}/epicecu-corelib-arduino
+          compliance: strict
+          library-manager: submit
+          project-type: library
+
+  arduino:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - run: task arduino:check
+      - run: task teensy:build
+
+  stm32:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: STMicroelectronics/STM32CubeF4
+          ref: v1.28.1
+          submodules: recursive
+          path: stm32cube-f4
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - run: task stm32:build STM32CUBE_F4_PATH=${{ github.workspace }}/stm32cube-f4

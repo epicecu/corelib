@@ -1,0 +1,12 @@
+if(NOT DEFINED NM OR NOT DEFINED LIBRARY)
+  message(FATAL_ERROR "NM and LIBRARY are required")
+endif()
+execute_process(COMMAND "${NM}" -g --defined-only "${LIBRARY}"
+  OUTPUT_VARIABLE SYMBOLS RESULT_VARIABLE RESULT)
+if(NOT RESULT EQUAL 0)
+  message(FATAL_ERROR "nm failed while checking the standard-only library")
+endif()
+if(SYMBOLS MATCHES "corelib_gateway_|gateway_route|gateway_discovery")
+  message(FATAL_ERROR "standard-only library contains gateway symbols")
+endif()
+message(STATUS "standard-only library contains no gateway symbols")

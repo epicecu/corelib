@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package epicecu.programmor.test_device.v1;
+
+message Share1 {
+  sfixed32 starting_number = 1;
+  sfixed32 ending_number = 2;
+  sfixed32 counter = 3;
+}
+
+message Share2 {
+  sfixed32 frequency_input_pin_id = 1;
+  sfixed32 digital_output_pin_id = 2;
+  sfixed32 analog_input_a_pin_id = 3;
+  sfixed32 analog_input_b_pin_id = 4;
+}
+
+message Share3 {
+  sfixed32 loops_per_second = 1;
+}
+
+message Share4 {
+  string welcome_text = 1;
+}
+
+message Share5 {
+  float float_number = 1;
+  double double_number = 2;
+  string ip_address = 3;
+  sfixed32 port_number = 4;
+  string date_time = 5;
+  bool boolean_value = 6;
+}
+
+message Share6 {
+  sfixed32 day_of_the_week = 1;
+}

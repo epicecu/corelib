@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+tasks:
+  package:cmake:
+    desc: Verify the installable CMake package and public headers
+    deps: [native:build]
+    cmds:
+      - cmake -E remove_directory /tmp/epicecu-corelib-install
+      - cmake -E remove_directory build/package-consumer-c
+      - cmake -E remove_directory build/package-consumer-cpp
+      - cmake -E remove_directory build/package-consumer-gateway
+      - cmake --install {{.BUILD_DIR}} --prefix /tmp/epicecu-corelib-install
+      - cmake -S tests/integration/consumer/installed-package -B build/package-consumer-c -DCMAKE_PREFIX_PATH=/tmp/epicecu-corelib-install
+      - cmake --build build/package-consumer-c --parallel
+      - '{{.ROOT_DIR}}/build/package-consumer-c/package_consumer'
+      - ETL_ROOT={{.ROOT_DIR}}/build/tooling/etl cmake -S tests/integration/consumer/installed-package -B build/package-consumer-cpp -DCMAKE_PREFIX_PATH=/tmp/epicecu-corelib-install -DCORELIB_CONSUMER_BUILD_CPP=ON
+      - cmake --build build/package-consumer-cpp --parallel
+      - '{{.ROOT_DIR}}/build/package-consumer-cpp/package_consumer_cpp'
+      - ETL_ROOT={{.ROOT_DIR}}/build/tooling/etl cmake -S tests/integration/consumer/installed-package -B build/package-consumer-gateway -DCMAKE_PREFIX_PATH=/tmp/epicecu-corelib-install -DCORELIB_CONSUMER_BUILD_CPP=ON -DCORELIB_CONSUMER_BUILD_GATEWAY=ON
+      - cmake --build build/package-consumer-gateway --parallel
+      - '{{.ROOT_DIR}}/build/package-consumer-gateway/package_consumer_gateway'
+      - '{{.ROOT_DIR}}/build/package-consumer-gateway/package_consumer_gateway_cpp'
+
+  package:arduino:
+    desc: Validate Arduino Library Manager structure and metadata
+    cmds:
+      - cmake -DROOT={{.ROOT_DIR}} -DOUTPUT=/tmp/epicecu-corelib-arduino -P cmake/stage_arduino.cmake
+      - '{{.ARDUINO_LINT}} --compliance strict --library-manager submit /tmp/epicecu-corelib-arduino'
+    preconditions:
+      - sh: command -v {{.ARDUINO_LINT}}
+        msg: Arduino Lint must be installed for the package check
