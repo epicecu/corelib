@@ -61,8 +61,7 @@ tasks:
           var: MISRA_PLATFORMS
         cmd: >-
           {{.CPPCHECK}}
-          src/corelib/device.c src/corelib/gateway.c
-          src/protocol/pfp.c src/protocol/transaction.c
+          src/corelib/*.c src/protocol/*.c
           --std=c11 --language=c --platform={{.ITEM}} -Isrc
           '-DUINT32_C(value)=value##U'
           --addon=config/cppcheck/misra.json

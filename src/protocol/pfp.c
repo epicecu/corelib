@@ -54,7 +54,7 @@ uint32_t corelib_crc32(const uint8_t *data, size_t size) {
     unsigned bit;
     crc ^= data[index];
     for (bit = 0; bit < 8u; ++bit) {
-      const uint32_t mask = (uint32_t) - (int32_t)(crc & 1u);
+      const uint32_t mask = (crc & 1u) != 0u ? UINT32_MAX : 0u;
       crc = (crc >> 1) ^ (0xedb88320u & mask);
     }
   }
@@ -83,8 +83,9 @@ static corelib_status_t validate(const corelib_pfp_frame_t *frame) {
       return CORELIB_INVALID_FRAME;
     }
     for (used = 0; used < sizeof(frame->payload); ++used) {
-      if (frame->payload[used] != 0u)
+      if (frame->payload[used] != 0u) {
         return CORELIB_INVALID_FRAME;
+      }
     }
     return CORELIB_OK;
   }
@@ -100,8 +101,9 @@ static corelib_status_t validate(const corelib_pfp_frame_t *frame) {
   if (frame->frame_index == frame->frame_count) {
     used = (size_t)frame->message_length - ((size_t)frame->frame_count - 1u) * 40u;
     while (used < sizeof(frame->payload)) {
-      if (frame->payload[used++] != 0u)
+      if (frame->payload[used++] != 0u) {
         return CORELIB_INVALID_FRAME;
+      }
     }
   }
   return CORELIB_OK;
@@ -109,43 +111,45 @@ static corelib_status_t validate(const corelib_pfp_frame_t *frame) {
 
 corelib_status_t corelib_pfp_decode(const uint8_t bytes[64], corelib_pfp_frame_t *frame) {
   if (bytes == NULL || frame == NULL || bytes[1] != CORELIB_PFP_VERSION ||
-      read_u32(bytes + 60) != corelib_crc32(bytes, 60u)) {
+      read_u32(&bytes[60]) != corelib_crc32(bytes, 60u)) {
     return CORELIB_INVALID_FRAME;
   }
   frame->type = bytes[0];
-  frame->destination = read_u16(bytes + 2);
-  frame->source = read_u16(bytes + 4);
-  frame->session_id = read_u32(bytes + 6);
-  frame->message_id = read_u32(bytes + 10);
+  frame->destination = read_u16(&bytes[2]);
+  frame->source = read_u16(&bytes[4]);
+  frame->session_id = read_u32(&bytes[6]);
+  frame->message_id = read_u32(&bytes[10]);
   frame->frame_index = bytes[14];
   frame->frame_count = bytes[15];
-  frame->message_length = read_u16(bytes + 16);
+  frame->message_length = read_u16(&bytes[16]);
   frame->hop_limit = bytes[18];
   frame->priority = bytes[19];
-  memcpy(frame->payload, bytes + 20, sizeof(frame->payload));
+  (void)memcpy(frame->payload, &bytes[20], sizeof(frame->payload));
   return validate(frame);
 }
 
 corelib_status_t corelib_pfp_encode(const corelib_pfp_frame_t *frame, uint8_t bytes[64]) {
   corelib_status_t status;
-  if (frame == NULL || bytes == NULL)
+  if (frame == NULL || bytes == NULL) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   status = validate(frame);
-  if (status != CORELIB_OK)
+  if (status != CORELIB_OK) {
     return status;
-  memset(bytes, 0, 64u);
+  }
+  (void)memset(bytes, 0, 64u);
   bytes[0] = frame->type;
   bytes[1] = CORELIB_PFP_VERSION;
-  write_u16(bytes + 2, frame->destination);
-  write_u16(bytes + 4, frame->source);
-  write_u32(bytes + 6, frame->session_id);
-  write_u32(bytes + 10, frame->message_id);
+  write_u16(&bytes[2], frame->destination);
+  write_u16(&bytes[4], frame->source);
+  write_u32(&bytes[6], frame->session_id);
+  write_u32(&bytes[10], frame->message_id);
   bytes[14] = frame->frame_index;
   bytes[15] = frame->frame_count;
-  write_u16(bytes + 16, frame->message_length);
+  write_u16(&bytes[16], frame->message_length);
   bytes[18] = frame->hop_limit;
   bytes[19] = frame->priority;
-  memcpy(bytes + 20, frame->payload, sizeof(frame->payload));
-  write_u32(bytes + 60, corelib_crc32(bytes, 60u));
+  (void)memcpy(&bytes[20], frame->payload, sizeof(frame->payload));
+  write_u32(&bytes[60], corelib_crc32(bytes, 60u));
   return CORELIB_OK;
 }

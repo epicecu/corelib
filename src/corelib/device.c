@@ -30,8 +30,9 @@ _Static_assert(sizeof(corelib_pending_request_t) <=
  * @return True when the condition or operation succeeds; otherwise false.
  */
 static bool begin_call(corelib_context_t *context) {
-  if (context == NULL || context->signature != SDK_SIGNATURE || context->in_call)
+  if (context == NULL || context->signature != SDK_SIGNATURE || context->in_call) {
     return false;
+  }
   context->in_call = true;
   return true;
 }
@@ -64,8 +65,18 @@ static void diagnostic(corelib_context_t *context, corelib_diagnostic_t code, co
  */
 static corelib_pending_request_t *pending_at(corelib_context_t *context, size_t index) {
   uint8_t *base = (uint8_t *)context->config.storage.pending_requests.entries;
-  return (corelib_pending_request_t *)(void *)(base +
-                                               index * context->config.storage.pending_requests.entry_size);
+  return (corelib_pending_request_t *)(void *)&base[index * context->config.storage.pending_requests.entry_size];
+}
+
+/**
+ * @brief Read-only pending request at a bounded storage index.
+ * @param[in] context Corelib context used by the operation.
+ * @param[in] index Bounded storage index.
+ * @return Matching internal entry.
+ */
+static const corelib_pending_request_t *pending_at_const(const corelib_context_t *context, size_t index) {
+  const uint8_t *base = (const uint8_t *)context->config.storage.pending_requests.entries;
+  return (const corelib_pending_request_t *)(const void *)&base[index * context->config.storage.pending_requests.entry_size];
 }
 
 /**
@@ -80,9 +91,9 @@ static void clear_protocol_state(corelib_context_t *context, bool notify) {
   context->session_state = CORELIB_SESSION_INACTIVE;
   context->outbound_head = 0u;
   context->outbound_count = 0u;
-  memset(context->reassembly, 0, sizeof(context->reassembly));
+  (void)memset(context->reassembly, 0, sizeof(context->reassembly));
   for (index = 0u; index < context->config.storage.pending_requests.capacity; ++index) {
-    memset(pending_at(context, index), 0, sizeof(corelib_pending_request_t));
+    (void)memset(pending_at(context, index), 0, sizeof(corelib_pending_request_t));
   }
   if (notify && context->config.callbacks.session_changed != NULL) {
     context->config.callbacks.session_changed(context->config.callbacks.user, CORELIB_SESSION_INACTIVE, 0u, 0u);
@@ -99,13 +110,13 @@ static void clear_protocol_state(corelib_context_t *context, bool notify) {
  */
 static corelib_status_t flush_frames(corelib_context_t *context) {
   while (context->outbound_count != 0u) {
-    uint8_t *frame = context->config.storage.outbound.frames +
-                     context->outbound_head * CORELIB_FRAME_SIZE;
+    uint8_t *frame = &context->config.storage.outbound.frames[context->outbound_head * CORELIB_FRAME_SIZE];
     const corelib_send_result_t result = context->config.callbacks.send_frame(
         context->config.callbacks.user, context->link_id,
         context->transport_context, frame);
-    if (result == CORELIB_SEND_BUSY)
+    if (result == CORELIB_SEND_BUSY) {
       return CORELIB_BUSY;
+    }
     context->outbound_head = (context->outbound_head + 1u) %
                              context->config.storage.outbound.capacity;
     --context->outbound_count;
@@ -132,10 +143,10 @@ static corelib_status_t queue_frame(corelib_context_t *context, const corelib_pf
   }
   slot = (context->outbound_head + context->outbound_count) %
          context->config.storage.outbound.capacity;
-  status = corelib_pfp_encode(frame, context->config.storage.outbound.frames +
-                                         slot * CORELIB_FRAME_SIZE);
-  if (status != CORELIB_OK)
+  status = corelib_pfp_encode(frame, &context->config.storage.outbound.frames[slot * CORELIB_FRAME_SIZE]);
+  if (status != CORELIB_OK) {
     return status;
+  }
   ++context->outbound_count;
   status = flush_frames(context);
   return status == CORELIB_BUSY ? CORELIB_OK : status;
@@ -148,8 +159,9 @@ static corelib_status_t queue_frame(corelib_context_t *context, const corelib_pf
  */
 static uint32_t next_message_id(corelib_context_t *context) {
   ++context->next_message_id;
-  if (context->next_message_id == 0u)
+  if (context->next_message_id == 0u) {
     context->next_message_id = 1u;
+  }
   return context->next_message_id;
 }
 
@@ -175,7 +187,7 @@ static corelib_status_t send_message(corelib_context_t *context, uint8_t type, c
     return CORELIB_CAPACITY_EXCEEDED;
   }
   message_id = next_message_id(context);
-  memset(&frame, 0, sizeof(frame));
+  (void)memset(&frame, 0, sizeof(frame));
   frame.type = type;
   frame.destination = CORELIB_ROOT_ADDRESS;
   frame.source = context->local_address;
@@ -191,11 +203,12 @@ static corelib_status_t send_message(corelib_context_t *context, uint8_t type, c
     const size_t chunk = remaining < 40u ? remaining : 40u;
     corelib_status_t status;
     frame.frame_index = (uint8_t)(frame_index + 1u);
-    memset(frame.payload, 0, sizeof(frame.payload));
-    memcpy(frame.payload, message + offset, chunk);
+    (void)memset(frame.payload, 0, sizeof(frame.payload));
+    (void)memcpy(frame.payload, &message[offset], chunk);
     status = queue_frame(context, &frame);
-    if (status != CORELIB_OK)
+    if (status != CORELIB_OK) {
       return status;
+    }
   }
   return CORELIB_OK;
 }
@@ -208,7 +221,7 @@ static corelib_status_t send_message(corelib_context_t *context, uint8_t type, c
  */
 static corelib_status_t send_probe_response(corelib_context_t *context, uint32_t message_id) {
   corelib_pfp_frame_t response;
-  memset(&response, 0, sizeof(response));
+  (void)memset(&response, 0, sizeof(response));
   response.type = CORELIB_PFP_PROBE_RESPONSE;
   response.destination = CORELIB_ROOT_ADDRESS;
   response.source = CORELIB_DIRECT_NODE_ADDRESS;
@@ -234,16 +247,18 @@ static bool control_tlv(const uint8_t *bytes, size_t size, uint8_t wanted, const
   while (offset < size) {
     uint8_t type;
     size_t length;
-    if (size - offset < 2u)
+    if (size - offset < 2u) {
       return false;
+    }
     type = (uint8_t)(bytes[offset] & 0x7fu);
     length = bytes[offset + 1u];
     offset += 2u;
-    if (type == 0u || type <= previous || length == 0u || length > size - offset)
+    if (type == 0u || type <= previous || length == 0u || length > size - offset) {
       return false;
+    }
     previous = type;
     if (type == wanted) {
-      *value = bytes + offset;
+      *value = &bytes[offset];
       *value_size = length;
       return true;
     }
@@ -257,35 +272,42 @@ bool corelib_control_valid_utf8(const uint8_t *bytes, size_t size) {
   while (offset < size) {
     uint32_t codepoint;
     size_t continuation;
-    uint8_t first = bytes[offset++];
-    if (first < 0x80u)
+    uint8_t first = bytes[offset];
+    ++offset;
+    if (first < 0x80u) {
       continue;
+    }
     if (first >= 0xc2u && first <= 0xdfu) {
-      codepoint = (uint32_t)(first & 0x1fu);
+      codepoint = (uint32_t)(uint8_t)(first & 0x1fu);
       continuation = 1u;
     } else if (first >= 0xe0u && first <= 0xefu) {
-      codepoint = (uint32_t)(first & 0x0fu);
+      codepoint = (uint32_t)(uint8_t)(first & 0x0fu);
       continuation = 2u;
     } else if (first >= 0xf0u && first <= 0xf4u) {
-      codepoint = (uint32_t)(first & 0x07u);
+      codepoint = (uint32_t)(uint8_t)(first & 0x07u);
       continuation = 3u;
     } else {
       return false;
     }
-    if (continuation > size - offset)
+    if (continuation > size - offset) {
       return false;
-    while (continuation-- != 0u) {
-      const uint8_t next = bytes[offset++];
-      if ((next & 0xc0u) != 0x80u)
+    }
+    while (continuation != 0u) {
+      const uint8_t next = bytes[offset];
+      --continuation;
+      ++offset;
+      if ((next & 0xc0u) != 0x80u) {
         return false;
-      codepoint = (codepoint << 6) | (uint32_t)(next & 0x3fu);
+      }
+      codepoint = (codepoint << 6u) | (uint32_t)(uint8_t)(next & 0x3fu);
     }
     if ((codepoint >= 0xd800u && codepoint <= 0xdfffu) ||
         codepoint > 0x10ffffu ||
         (codepoint < 0x80u) ||
         (codepoint < 0x800u && first >= 0xe0u) ||
-        (codepoint < 0x10000u && first >= 0xf0u))
+        (codepoint < 0x10000u && first >= 0xf0u)) {
       return false;
+    }
   }
   return true;
 }
@@ -304,20 +326,23 @@ static bool valid_control_tlvs(const uint8_t *bytes, size_t size) {
     const uint8_t type = (uint8_t)(encoded_type & 0x7fu);
     size_t length;
     bool valid_length;
-    if (size - offset < 2u)
+    if (size - offset < 2u) {
       return false;
+    }
     length = bytes[offset + 1u];
     offset += 2u;
-    if (type == 0u || type <= previous || length == 0u || length > size - offset)
+    if (type == 0u || type <= previous || length == 0u || length > size - offset) {
       return false;
+    }
     valid_length = ((type == 1u || type == 11u) && length == 16u) ||
                    ((type >= 2u && type <= 4u) && length == 2u) ||
                    ((type == 5u || type == 6u || type == 9u || type == 10u) && length == 4u) ||
                    (type == 7u && length == 2u) ||
                    (type == 8u && length <= 16u);
     if ((!valid_length && (encoded_type & 0x80u) != 0u) ||
-        (type == 8u && !corelib_control_valid_utf8(bytes + offset, length)))
+        (type == 8u && !corelib_control_valid_utf8(&bytes[offset], length))) {
       return false;
+    }
     previous = type;
     offset += length;
   }
@@ -373,11 +398,12 @@ static bool exact_control_fields(const uint8_t *bytes, size_t size, uint16_t all
     const uint8_t type = (uint8_t)(encoded & 0x7fu);
     const bool critical = (encoded & 0x80u) != 0u;
     const size_t length = bytes[offset + 1u];
-    const uint16_t bit = type < 16u ? (uint16_t)(1u << type) : 0u;
+    const uint16_t bit = type < 16u ? (uint16_t)((uint16_t)1u << type) : 0u;
     if (bit == 0u || (allowed & bit) == 0u ||
         ((required_critical & bit) != 0u && !critical) ||
-        ((optional_noncritical & bit) != 0u && critical))
+        ((optional_noncritical & bit) != 0u && critical)) {
       return false;
+    }
     seen |= bit;
     offset += 2u + length;
   }
@@ -385,8 +411,6 @@ static bool exact_control_fields(const uint8_t *bytes, size_t size, uint16_t all
 }
 
 corelib_status_t corelib_process_control_message(corelib_context_t *context, const uint8_t *bytes, size_t size, uint32_t frame_session) {
-  uint8_t response[64];
-  size_t response_size = 8u;
   uint8_t opcode;
   uint32_t transaction_id;
   const uint8_t *value;
@@ -394,49 +418,64 @@ corelib_status_t corelib_process_control_message(corelib_context_t *context, con
   if (size < 8u || bytes[0] != 1u || bytes[2] != 0u || bytes[3] != 0u) {
     return CORELIB_INVALID_FRAME;
   }
-  if (!valid_control_tlvs(bytes, size))
+  if (!valid_control_tlvs(bytes, size)) {
     return CORELIB_INVALID_FRAME;
+  }
   opcode = bytes[1];
-  transaction_id = get_u32(bytes + 4);
+  transaction_id = get_u32(&bytes[4]);
   if (opcode == CONTROL_SESSION_START) {
-    uint32_t heartbeat = context->config.heartbeat_interval_ms;
+    uint8_t response[64];
+    size_t response_size = 8u;
+    uint32_t heartbeat;
     if (frame_session == 0u || transaction_id == 0u ||
-        !exact_control_fields(bytes, size, (uint16_t)(1u << TLV_HEARTBEAT_INTERVAL),
-                              (uint16_t)(1u << TLV_HEARTBEAT_INTERVAL), 0u))
+        !exact_control_fields(bytes, size, (uint16_t)((uint16_t)1u << TLV_HEARTBEAT_INTERVAL),
+                              (uint16_t)((uint16_t)1u << TLV_HEARTBEAT_INTERVAL), 0u)) {
       return CORELIB_INVALID_FRAME;
+    }
     if (context->session_state != CORELIB_SESSION_INACTIVE &&
-        context->session_id != frame_session)
+        context->session_id != frame_session) {
       return CORELIB_INVALID_STATE;
+    }
     if (!control_tlv(bytes, size, TLV_HEARTBEAT_INTERVAL, &value, &value_size) ||
-        value_size != 4u)
+        value_size != 4u) {
       return CORELIB_INVALID_FRAME;
+    }
     heartbeat = get_u32(value);
-    if (heartbeat < 100u || heartbeat > 60000u)
+    if (heartbeat < 100u || heartbeat > 60000u) {
       return CORELIB_INVALID_FRAME;
+    }
     context->session_id = frame_session;
     context->local_address = CORELIB_DIRECT_NODE_ADDRESS;
     context->session_state = CORELIB_SESSION_ACTIVE;
     context->config.heartbeat_interval_ms = heartbeat;
     context->next_heartbeat_ms = context->now_ms + heartbeat;
-    memset(response, 0, sizeof(response));
+    (void)memset(response, 0, sizeof(response));
     response[0] = 1u;
     response[1] = CONTROL_SESSION_STATUS;
-    put_u32(response + 4, transaction_id);
-    response[response_size++] = (uint8_t)(0x80u | TLV_NODE_UUID);
-    response[response_size++] = 16u;
-    memcpy(response + response_size, context->config.node_uuid, 16u);
+    put_u32(&response[4], transaction_id);
+    response[response_size] = (uint8_t)(0x80u | TLV_NODE_UUID);
+    ++response_size;
+    response[response_size] = 16u;
+    ++response_size;
+    (void)memcpy(&response[response_size], context->config.node_uuid, 16u);
     response_size += 16u;
-    response[response_size++] = (uint8_t)(0x80u | TLV_NODE_ADDRESS);
-    response[response_size++] = 2u;
-    put_u16(response + response_size, context->local_address);
+    response[response_size] = (uint8_t)(0x80u | TLV_NODE_ADDRESS);
+    ++response_size;
+    response[response_size] = 2u;
+    ++response_size;
+    put_u16(&response[response_size], context->local_address);
     response_size += 2u;
-    response[response_size++] = (uint8_t)(0x80u | TLV_CAPABILITIES);
-    response[response_size++] = 4u;
-    put_u32(response + response_size, context->config.capabilities);
+    response[response_size] = (uint8_t)(0x80u | TLV_CAPABILITIES);
+    ++response_size;
+    response[response_size] = 4u;
+    ++response_size;
+    put_u32(&response[response_size], context->config.capabilities);
     response_size += 4u;
-    response[response_size++] = (uint8_t)(0x80u | TLV_STATUS);
-    response[response_size++] = 2u;
-    put_u16(response + response_size, 0u);
+    response[response_size] = (uint8_t)(0x80u | TLV_STATUS);
+    ++response_size;
+    response[response_size] = 2u;
+    ++response_size;
+    put_u16(&response[response_size], 0u);
     response_size += 2u;
     if (context->config.callbacks.session_changed != NULL) {
       context->config.callbacks.session_changed(context->config.callbacks.user, context->session_state, context->session_id, context->local_address);
@@ -447,19 +486,22 @@ corelib_status_t corelib_process_control_message(corelib_context_t *context, con
     return send_message(context, CORELIB_PFP_CONTROL, response, response_size);
   }
   if (frame_session != context->session_id ||
-      context->session_state == CORELIB_SESSION_INACTIVE)
+      context->session_state == CORELIB_SESSION_INACTIVE) {
     return CORELIB_INVALID_STATE;
+  }
   if (opcode == CONTROL_SESSION_END) {
     if (transaction_id != 0u ||
-        !exact_control_fields(bytes, size, (uint16_t)(1u << 8u), 0u,
-                              (uint16_t)(1u << 8u)))
+        !exact_control_fields(bytes, size, (uint16_t)((uint16_t)1u << 8u), 0u,
+                              (uint16_t)((uint16_t)1u << 8u))) {
       return CORELIB_INVALID_FRAME;
+    }
     clear_protocol_state(context, true);
     return CORELIB_OK;
   }
   if (opcode == CONTROL_HEARTBEAT) {
-    if (transaction_id != 0u || size != 8u)
+    if (transaction_id != 0u || size != 8u) {
       return CORELIB_INVALID_FRAME;
+    }
     return CORELIB_OK;
   }
   return CORELIB_UNSUPPORTED;
@@ -487,10 +529,13 @@ static corelib_reassembly_entry_t *find_assembly(corelib_context_t *context, con
                entry->destination == frame->destination && entry->type == frame->type) {
       *slot_index = index;
       return entry;
+    } else {
+      /* Retain the first free slot while searching for an exact match. */
     }
   }
-  if (free_entry != NULL)
+  if (free_entry != NULL) {
     *slot_index = free_index;
+  }
   return free_entry;
 }
 
@@ -504,9 +549,10 @@ static corelib_reassembly_entry_t *find_assembly(corelib_context_t *context, con
  * @return Operation status.
  */
 static corelib_status_t process_complete(corelib_context_t *context, uint8_t type, const uint8_t *message, size_t size, uint32_t session_id) {
-  if (type == CORELIB_PFP_CONTROL)
+  if (type == CORELIB_PFP_CONTROL) {
     return corelib_process_control_message(context, message, size,
                                            session_id);
+  }
   if (type == CORELIB_PFP_DATA) {
     corelib_transaction_message_t decoded;
     corelib_status_t status = corelib_transaction_decode(message, size,
@@ -527,9 +573,10 @@ static corelib_status_t process_complete(corelib_context_t *context, uint8_t typ
           break;
         }
       }
-      if (pending == NULL)
+      if (pending == NULL) {
         return CORELIB_CAPACITY_EXCEEDED;
-      memset(pending, 0, sizeof(*pending));
+      }
+      (void)memset(pending, 0, sizeof(*pending));
       pending->magic = CORELIB_PENDING_MAGIC;
       pending->used = true;
       pending->token = decoded.token;
@@ -563,13 +610,13 @@ static corelib_status_t accept_fragment(corelib_context_t *context, const coreli
   size_t offset;
   size_t chunk;
   size_t index;
-  if (entry == NULL)
+  if (entry == NULL) {
     return CORELIB_CAPACITY_EXCEEDED;
-  message = context->config.storage.reassembly.message +
-            slot_index * context->config.storage.maximum_message_size;
-  received = context->config.storage.reassembly.received + slot_index * 255u;
+  }
+  message = &context->config.storage.reassembly.message[slot_index * context->config.storage.maximum_message_size];
+  received = &context->config.storage.reassembly.received[slot_index * 255u];
   if (!entry->used) {
-    memset(entry, 0, sizeof(*entry));
+    (void)memset(entry, 0, sizeof(*entry));
     entry->used = true;
     entry->session_id = frame->session_id;
     entry->message_id = frame->message_id;
@@ -581,29 +628,33 @@ static corelib_status_t accept_fragment(corelib_context_t *context, const coreli
     entry->hop_limit = frame->hop_limit;
     entry->priority = frame->priority;
     entry->started_ms = context->now_ms;
-    memset(received, 0, 255u);
+    (void)memset(received, 0, 255u);
   } else if (entry->message_length != frame->message_length ||
              entry->frame_count != frame->frame_count ||
              entry->hop_limit != frame->hop_limit || entry->priority != frame->priority) {
     entry->used = false;
     return CORELIB_INVALID_FRAME;
+  } else {
+    /* Continue receiving a fragment for the matching assembly. */
   }
   offset = ((size_t)frame->frame_index - 1u) * 40u;
   chunk = (size_t)entry->message_length - offset;
-  if (chunk > 40u)
+  if (chunk > 40u) {
     chunk = 40u;
+  }
   if (received[frame->frame_index - 1u] != 0u) {
-    if (memcmp(message + offset, frame->payload, chunk) != 0) {
+    if (memcmp(&message[offset], frame->payload, chunk) != 0) {
       entry->used = false;
       return CORELIB_INVALID_FRAME;
     }
     return CORELIB_OK;
   }
-  memcpy(message + offset, frame->payload, chunk);
+  (void)memcpy(&message[offset], frame->payload, chunk);
   received[frame->frame_index - 1u] = 1u;
   for (index = 0u; index < entry->frame_count; ++index) {
-    if (received[index] == 0u)
+    if (received[index] == 0u) {
       return CORELIB_OK;
+    }
   }
   {
     const uint8_t type = entry->type;
@@ -646,8 +697,9 @@ corelib_status_t corelib_init(void *context_memory, size_t context_memory_size, 
       config->maximum_transaction_data_size < CORELIB_MIN_TRANSACTION_DATA_SIZE ||
       config->maximum_transaction_data_size > config->storage.maximum_message_size - 19u ||
       config->heartbeat_interval_ms < 100u || config->heartbeat_interval_ms > 60000u ||
-      config->application_response_timeout_ms == 0u)
+      config->application_response_timeout_ms == 0u) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   if ((config->node_uuid[6] & 0xf0u) != 0x40u ||
       (config->node_uuid[8] & 0xc0u) != 0x80u) {
     return CORELIB_INVALID_ARGUMENT;
@@ -656,7 +708,7 @@ corelib_status_t corelib_init(void *context_memory, size_t context_memory_size, 
     return CORELIB_UNSUPPORTED;
   }
   created = (corelib_context_t *)context_memory;
-  memset(created, 0, sizeof(*created));
+  (void)memset(created, 0, sizeof(*created));
   created->config = *config;
   created->signature = SDK_SIGNATURE;
   created->next_message_id = 0u;
@@ -667,8 +719,9 @@ corelib_status_t corelib_init(void *context_memory, size_t context_memory_size, 
 }
 
 corelib_status_t corelib_reset(corelib_context_t *context) {
-  if (!begin_call(context))
+  if (!begin_call(context)) {
     return CORELIB_REENTRANT;
+  }
   clear_protocol_state(context, true);
   end_call(context);
   return CORELIB_OK;
@@ -677,8 +730,9 @@ corelib_status_t corelib_reset(corelib_context_t *context) {
 corelib_status_t corelib_tick(corelib_context_t *context, uint64_t monotonic_ms) {
   size_t index;
   corelib_status_t result = CORELIB_OK;
-  if (!begin_call(context))
+  if (!begin_call(context)) {
     return CORELIB_REENTRANT;
+  }
   if (monotonic_ms < context->now_ms) {
     diagnostic(context, CORELIB_DIAGNOSTIC_TIME_REVERSED, CORELIB_INVALID_ARGUMENT);
     end_call(context);
@@ -715,8 +769,9 @@ corelib_status_t corelib_tick(corelib_context_t *context, uint64_t monotonic_ms)
 }
 
 corelib_status_t corelib_add_link(corelib_context_t *context, corelib_link_id_t link_id, void *transport_context) {
-  if (!begin_call(context))
+  if (!begin_call(context)) {
     return CORELIB_REENTRANT;
+  }
   if (link_id == 0u || context->link_active) {
     end_call(context);
     return CORELIB_INVALID_STATE;
@@ -729,8 +784,9 @@ corelib_status_t corelib_add_link(corelib_context_t *context, corelib_link_id_t 
 }
 
 corelib_status_t corelib_remove_link(corelib_context_t *context, corelib_link_id_t link_id) {
-  if (!begin_call(context))
+  if (!begin_call(context)) {
     return CORELIB_REENTRANT;
+  }
   if (!context->link_active || context->link_id != link_id) {
     end_call(context);
     return CORELIB_NOT_FOUND;
@@ -745,8 +801,9 @@ corelib_status_t corelib_remove_link(corelib_context_t *context, corelib_link_id
 corelib_status_t corelib_receive_frame(corelib_context_t *context, corelib_link_id_t link_id, const uint8_t frame_bytes[CORELIB_FRAME_SIZE], uint64_t monotonic_ms) {
   corelib_pfp_frame_t frame;
   corelib_status_t status;
-  if (!begin_call(context))
+  if (!begin_call(context)) {
     return CORELIB_REENTRANT;
+  }
   if (frame_bytes == NULL || !context->link_active || context->link_id != link_id ||
       monotonic_ms < context->now_ms) {
     end_call(context);
@@ -792,8 +849,9 @@ corelib_status_t corelib_respond(corelib_context_t *context, const corelib_trans
   uint8_t *encoded;
   size_t encoded_size = 0u;
   corelib_status_t status;
-  if (!begin_call(context))
+  if (!begin_call(context)) {
     return CORELIB_REENTRANT;
+  }
   if (request == NULL || result < CORELIB_RESULT_SUCCESS ||
       result > CORELIB_RESULT_INTERNAL_ERROR ||
       (result == CORELIB_RESULT_SUCCESS && data_size != 0u && data == NULL) ||
@@ -816,7 +874,7 @@ corelib_status_t corelib_respond(corelib_context_t *context, const corelib_trans
     return CORELIB_NOT_FOUND;
   }
   encoded = context->config.storage.transaction_scratch;
-  memset(&message, 0, sizeof(message));
+  (void)memset(&message, 0, sizeof(message));
   message.token = request->token;
   message.share_id = request->share_id;
   message.action = request->action == CORELIB_ACTION_COMMON_REQUEST ? 3u : 6u;
@@ -825,10 +883,12 @@ corelib_status_t corelib_respond(corelib_context_t *context, const corelib_trans
   message.data_size = data_size;
   status = corelib_transaction_encode(&message, encoded,
                                       context->config.storage.maximum_message_size, &encoded_size);
-  if (status == CORELIB_OK)
+  if (status == CORELIB_OK) {
     status = send_message(context, CORELIB_PFP_DATA, encoded, encoded_size);
-  if (status == CORELIB_OK)
+  }
+  if (status == CORELIB_OK) {
     pending->used = false;
+  }
   end_call(context);
   return status;
 }
@@ -838,17 +898,19 @@ corelib_status_t corelib_publish(corelib_context_t *context, bool common, uint32
   uint8_t *encoded;
   size_t encoded_size = 0u;
   corelib_status_t status;
-  if (!begin_call(context))
+  if (!begin_call(context)) {
     return CORELIB_REENTRANT;
+  }
   if (share_id == 0u || (data_size != 0u && data == NULL) ||
       data_size > context->config.maximum_transaction_data_size) {
     end_call(context);
     return CORELIB_INVALID_ARGUMENT;
   }
   ++context->next_publish_token;
-  if (context->next_publish_token == 0u)
+  if (context->next_publish_token == 0u) {
     context->next_publish_token = 1u;
-  memset(&message, 0, sizeof(message));
+  }
+  (void)memset(&message, 0, sizeof(message));
   message.token = context->next_publish_token;
   message.share_id = share_id;
   message.action = common ? 2u : 5u;
@@ -857,8 +919,9 @@ corelib_status_t corelib_publish(corelib_context_t *context, bool common, uint32
   encoded = context->config.storage.transaction_scratch;
   status = corelib_transaction_encode(&message, encoded,
                                       context->config.storage.maximum_message_size, &encoded_size);
-  if (status == CORELIB_OK)
+  if (status == CORELIB_OK) {
     status = send_message(context, CORELIB_PFP_DATA, encoded, encoded_size);
+  }
   end_call(context);
   return status;
 }
@@ -873,9 +936,10 @@ corelib_version_t corelib_version(void) {
 
 corelib_status_t corelib_usage(const corelib_context_t *context, corelib_usage_t *usage) {
   size_t index;
-  if (context == NULL || context->signature != SDK_SIGNATURE || usage == NULL)
+  if (context == NULL || context->signature != SDK_SIGNATURE || usage == NULL) {
     return CORELIB_INVALID_ARGUMENT;
-  memset(usage, 0, sizeof(*usage));
+  }
+  (void)memset(usage, 0, sizeof(*usage));
   usage->queued_frames = (uint16_t)context->outbound_count;
   for (index = 0u; index < context->config.storage.reassembly_slot_count; ++index) {
     if (context->reassembly[index].used) {
@@ -884,9 +948,10 @@ corelib_status_t corelib_usage(const corelib_context_t *context, corelib_usage_t
     }
   }
   for (index = 0u; index < context->config.storage.pending_requests.capacity; ++index) {
-    const corelib_pending_request_t *pending = pending_at((corelib_context_t *)context, index);
-    if (pending->magic == CORELIB_PENDING_MAGIC && pending->used)
+    const corelib_pending_request_t *pending = pending_at_const(context, index);
+    if (pending->magic == CORELIB_PENDING_MAGIC && pending->used) {
       ++usage->pending_requests;
+    }
   }
   return CORELIB_OK;
 }
@@ -904,8 +969,9 @@ corelib_status_t corelib_limits(const corelib_context_t *context, corelib_limits
 }
 
 corelib_status_t corelib_accept_bootstrap_assignment(corelib_context_t *context, const corelib_bootstrap_assignment_t *assignment, uint64_t monotonic_ms) {
-  if (!begin_call(context))
+  if (!begin_call(context)) {
     return CORELIB_REENTRANT;
+  }
   if (assignment == NULL || monotonic_ms < context->now_ms ||
       assignment->session_id == 0u || assignment->transaction_id == 0u ||
       assignment->node_address < CORELIB_DIRECT_NODE_ADDRESS ||
@@ -923,10 +989,12 @@ corelib_status_t corelib_accept_bootstrap_assignment(corelib_context_t *context,
   context->session_state = CORELIB_SESSION_ACTIVE;
   context->config.heartbeat_interval_ms = assignment->heartbeat_interval_ms;
   context->next_heartbeat_ms = monotonic_ms + assignment->heartbeat_interval_ms;
-  if (context->config.callbacks.session_changed != NULL)
+  if (context->config.callbacks.session_changed != NULL) {
     context->config.callbacks.session_changed(context->config.callbacks.user, context->session_state, context->session_id, context->local_address);
-  if (context->config.callbacks.node_changed != NULL)
+  }
+  if (context->config.callbacks.node_changed != NULL) {
     context->config.callbacks.node_changed(context->config.callbacks.user, context->config.node_uuid, true, context->local_address);
+  }
   end_call(context);
   return CORELIB_OK;
 }

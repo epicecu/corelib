@@ -55,16 +55,21 @@ static bool valid_message(const corelib_transaction_message_t *message, size_t m
   const bool response = message->action == 3u || message->action == 6u;
   if (message->token == 0u || message->share_id == 0u ||
       (!request && !publish && !response) || message->result > 5u ||
-      message->data_size > max_data)
+      message->data_size > max_data) {
     return false;
-  if ((request || publish) && message->result != 0u)
+  }
+  if ((request || publish) && message->result != 0u) {
     return false;
-  if (request && message->data_size != 0u)
+  }
+  if (request && message->data_size != 0u) {
     return false;
-  if (response && message->result == 0u)
+  }
+  if (response && message->result == 0u) {
     return false;
-  if (response && message->result != 1u && message->data_size != 0u)
+  }
+  if (response && message->result != 1u && message->data_size != 0u) {
     return false;
+  }
   return true;
 }
 
@@ -73,8 +78,9 @@ corelib_status_t corelib_transaction_decode(const uint8_t *bytes, size_t size, s
       epicecu_programmor_transaction_v2_TransactionMessage_init_zero;
   bytes_view_t view = {NULL, 0u};
   pb_istream_t stream;
-  if (bytes == NULL || message == NULL)
+  if (bytes == NULL || message == NULL) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   decoded.data.funcs.decode = decode_bytes;
   decoded.data.arg = &view;
   stream = pb_istream_from_buffer(bytes, size);
@@ -85,7 +91,7 @@ corelib_status_t corelib_transaction_decode(const uint8_t *bytes, size_t size, s
       decoded.protocol_version != CORELIB_TRANSACTION_VERSION) {
     return CORELIB_INVALID_FRAME;
   }
-  memset(message, 0, sizeof(*message));
+  (void)memset(message, 0, sizeof(*message));
   message->token = decoded.token;
   message->share_id = decoded.share_id;
   message->action = (uint8_t)decoded.action;
