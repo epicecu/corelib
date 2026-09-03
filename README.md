@@ -2,347 +2,164 @@
 
 <img src="docs/public/corelib-logo.png" alt="EpicECU Corelib" width="400" />
 
-##### Portable C11 middleware for Programmor-compatible microcontroller devices
+### Portable, heap-free middleware for Programmor-compatible embedded devices
 
 </div>
 
 [![CI](https://github.com/epicecu/corelib/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/epicecu/corelib/actions/workflows/ci.yml)
 [![Documentation](https://github.com/epicecu/corelib/actions/workflows/docs.yml/badge.svg)](https://epicecu.github.io/corelib/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Version 1.0.0 implements Portable Frame Protocol (PFP) v1 and Transaction
-Protocol v2 for Arduino, bare-metal firmware, and MCU projects with an
-application-controlled scheduler.
+Corelib implements Portable Frame Protocol (PFP) v1 and Transaction Protocol
+v2 for Arduino, bare-metal firmware, and MCU projects with an
+application-controlled scheduler. The canonical core is portable C11, with an
+optional fixed-storage C++14 facade.
 
 Documentation: https://epicecu.github.io/corelib/
 
-The core has no heap, hardware abstraction layer, scheduler, filesystem,
-network stack, or background-work dependency. It receives and emits complete
-64-byte PFP frames and treats device-specific Common and Share payloads as
-opaque bytes.
+## Highlights
 
-## Install
+- Standard Device endpoints and an optional multi-link Gateway component.
+- Complete 64-byte PFP frames over an application-owned transport.
+- Common and Share requests, responses, and publications.
+- Caller-owned C storage and compile-time-sized C++ storage.
+- No heap, scheduler, hardware abstraction layer, filesystem, or background
+  work.
+- Explicit resource limits, transport back-pressure, diagnostics, and
+  lifecycle callbacks.
+- CMake packages plus Arduino, Pico SDK, STM32Cube, and Teensy compatibility.
 
-For CMake firmware, add this repository with `add_subdirectory()` and link
-`Corelib::Device`. C++14 consumers enable `CORELIB_BUILD_CPP`,
-provide ETL 20.x through `CORELIB_ETL_ROOT`, and link
-`Corelib::DeviceCpp`. Installed-package consumers request the `Cpp`
-component. The C target remains ETL-independent.
+## Choose a role
 
-Gateway-capable firmware additionally enables `CORELIB_BUILD_GATEWAY`
-and links `Corelib::Gateway` or `Corelib::GatewayCpp`.
-Gateway code and storage are absent from the default standard-device target.
-For example, configure CMake with
-`-DCORELIB_BUILD_GATEWAY=ON`; linking a gateway target then supplies the
-required compile definition to consumers.
+Use `corelib_context_t` or `corelib::Device<>` for a standard addressable
+endpoint with one upstream PFP link.
 
-The repository also follows the Arduino 1.5 library layout. Install it from a
-ZIP or clone it into the Arduino libraries directory, then include:
+Use `corelib_gateway_context_t` or `corelib::Gateway<>` for an ECU that is both
+an addressable endpoint and a router for bounded downstream links. Gateway
+support is optional and absent from standard-only builds.
 
-```cpp
-#include <Corelib.h>
-```
-
-Arduino gateway sketches define `CORELIB_ENABLE_GATEWAY=1` before that
-include. This exposes the optional gateway facade through the umbrella header;
-it is distinct from the CMake build option.
-
-Framework-neutral consumers may include the role-specific API directly:
-
-```c
-#include <corelib/device.h>
-```
-
-```cpp
-#include <corelib/device.hpp>
-#include <corelib/gateway.hpp>
-```
-
-## Repository layout
-
-- `src/corelib` keeps each device and gateway implementation beside its
-  public C and C++ headers.
-- `src/protocol` contains owned PFP and Transaction Protocol codecs.
-- `src/internal` contains private implementation contracts.
-- `src/vendor` and generated protocol directories retain upstream formatting.
-- [`examples`](examples), `docs`, `tests`, and `tasks` contain integration examples,
-  guidance, validation, and developer workflows.
-
-The source conventions and documentation policy are defined in
-[`docs/style.md`](docs/style.md).
+See the [architecture](docs/architecture.md),
+[Device guide](docs/device.md), and [Gateway guide](docs/gateway.md) for the
+complete integration boundaries.
 
 ## Quick start: C
 
-The C11 API is the canonical integration path. Firmware supplies fixed storage,
-callbacks, a transport link, and a monotonic clock:
+The C11 API uses opaque contexts and caller-owned fixed storage. This skeleton
+shows the complete initialisation shape; production firmware supplies the
+transport implementation, persistent UUIDv4, and application handlers.
 
 ```c
 #include <corelib/device.h>
 
-corelib_config_t config = {0};
-corelib_context_t *device = NULL;
+#include <stdalign.h>
+#include <stddef.h>
+#include <stdint.h>
 
-/* Bind the caller-owned storage and callbacks described in the C guide. */
-configure_corelib(&config);
-if (corelib_init(context_memory, sizeof(context_memory), &config, &device) ==
-    CORELIB_OK) {
-  (void)corelib_add_link(device, 1u, &transport);
-}
-```
-
-See the complete [C Device integration guide](docs/device.md) for storage,
-callback, transaction, and scheduling details.
-
-### C++ and Arduino example
-
-The C++ facade owns Corelib's fixed storage, so a small Arduino application can
-be integrated without heap allocation. This complete example uses `Serial` as
-a transport for 64-byte PFP frames:
-
-```cpp
-#include <Corelib.h>
-
-constexpr corelib_link_id_t kSerialLink = 1;
-
-uint8_t incoming_frame[CORELIB_FRAME_SIZE];
-size_t incoming_size = 0;
-bool response_pending = false;
-corelib::TransactionId pending_request{};
-
-class DeviceHandler final : public corelib::Handler {
- public:
-  corelib::SendResult sendFrame(corelib::LinkId, void *,
-                                   corelib::FrameView frame) override {
-    if (static_cast<size_t>(Serial.availableForWrite()) < frame.size()) {
-      return corelib::SendResult::Busy;
-    }
-    return Serial.write(frame.data(), frame.size()) == frame.size()
-               ? corelib::SendResult::Accepted
-               : corelib::SendResult::Failed;
-  }
-
-  void onTransaction(const corelib::TransactionView &transaction) override {
-    // Callback data is borrowed, so copy what the application needs.
-    pending_request = transaction.id;
-    response_pending = true;
-  }
+enum {
+  MAXIMUM_MESSAGE_BYTES = 512,
+  REASSEMBLY_SLOTS = 2,
+  OUTBOUND_FRAMES = 16,
+  PENDING_REQUESTS = 4
 };
 
-DeviceHandler handler;
-corelib::Device<512, 2, 16, 4> device;
+alignas(max_align_t) static uint8_t context_memory[CORELIB_CONTEXT_STORAGE_SIZE];
+static uint8_t messages[MAXIMUM_MESSAGE_BYTES * REASSEMBLY_SLOTS];
+static uint8_t received[255 * REASSEMBLY_SLOTS];
+static uint8_t scratch[MAXIMUM_MESSAGE_BYTES];
+static uint8_t outbound[CORELIB_FRAME_SIZE * OUTBOUND_FRAMES];
+alignas(max_align_t) static uint8_t
+    pending[CORELIB_PENDING_REQUEST_STORAGE_SIZE * PENDING_REQUESTS];
+static corelib_context_t *device;
 
-bool init_sdk() {
-  corelib::Config config;
-  // Replace this with the device's provisioned, persistent UUIDv4.
-  config.nodeUuid[0] = 0x12;
-  config.nodeUuid[6] = 0x40;
-  config.nodeUuid[8] = 0x80;
-  config.maximumTransactionDataSize = 256;
-
-  return device.init(config, handler) == corelib::Status::Ok &&
-         device.addLink(kSerialLink) == corelib::Status::Ok;
+static corelib_send_result_t send_frame(void *user, corelib_link_id_t link, void *transport, const uint8_t frame[CORELIB_FRAME_SIZE]) {
+  /* Buffer the complete frame without blocking or partially consuming it. */
+  return application_send_frame(user, link, transport, frame);
 }
 
-void setup() {
-  Serial.begin(115200);
-  (void)init_sdk();
+corelib_status_t initialise_corelib(void *application, void *transport) {
+  corelib_config_t config = {0};
+
+  application_load_uuid(config.node_uuid);
+  config.heartbeat_interval_ms = 2000u;
+  config.application_response_timeout_ms = 1000u;
+  config.maximum_transaction_data_size = 256u;
+  config.callbacks.send_frame = send_frame;
+  config.callbacks.user = application;
+  config.storage.reassembly.message = messages;
+  config.storage.reassembly.received = received;
+  config.storage.reassembly_slot_count = REASSEMBLY_SLOTS;
+  config.storage.maximum_message_size = MAXIMUM_MESSAGE_BYTES;
+  config.storage.transaction_scratch = scratch;
+  config.storage.outbound.frames = outbound;
+  config.storage.outbound.capacity = OUTBOUND_FRAMES;
+  config.storage.pending_requests.entries = pending;
+  config.storage.pending_requests.capacity = PENDING_REQUESTS;
+  config.storage.pending_requests.entry_size =
+      corelib_pending_request_entry_size();
+
+  corelib_status_t status = corelib_init(
+      context_memory, sizeof(context_memory), &config, &device);
+  if (status == CORELIB_OK) {
+    status = corelib_add_link(device, 1u, transport);
+  }
+  return status;
 }
-
-void loop() {
-  while (Serial.available() > 0 && incoming_size < sizeof(incoming_frame)) {
-    const int value = Serial.read();
-    if (value >= 0) {
-      incoming_frame[incoming_size++] = static_cast<uint8_t>(value);
-    }
-  }
-
-  if (incoming_size == sizeof(incoming_frame)) {
-    (void)device.receive(kSerialLink, incoming_frame, millis());
-    incoming_size = 0;
-  }
-
-  if (response_pending) {
-    response_pending = false;
-    (void)device.respond(pending_request, corelib::Result::Unsupported);
-  }
-
-  (void)device.tick(millis());
-}
 ```
 
-This example deliberately returns `UNSUPPORTED` for application requests.
-Replace that response with the device's Common or Share handling. Keep response
-work outside the transaction callback, because callback data is borrowed and
-Corelib calls for one context must be serialized.
+Pass each complete received frame to `corelib_receive_frame()`, process
+application work outside callbacks, and call `corelib_tick()` regularly with a
+non-decreasing monotonic time. The [C Device guide](docs/device.md) covers the
+full lifecycle, transactions, storage, and failure handling.
 
-Your transport may be UART, USB CDC, HID, or another packet link, but it must
-deliver and accept complete 64-byte frames. Production firmware must also use a
-persistent UUIDv4 and pass a non-decreasing monotonic time to `receive()` and
-`tick()`. See the complete [`DeviceSerial`](examples/DeviceSerial) sketch and
-the [Device](docs/device.md) and [transport](docs/transport.md)
-guides when adapting the example to a real device.
+## Installation
 
-## Build and validate
+Add Corelib directly to CMake and link the required role:
 
-Install [Task](https://taskfile.dev/), CMake, GCC or Clang, and run:
+```cmake
+add_subdirectory(path/to/corelib)
+target_link_libraries(firmware PRIVATE Corelib::Device)
+```
+
+Enable `CORELIB_BUILD_GATEWAY` and link `Corelib::Gateway` for the C gateway.
+Enable `CORELIB_BUILD_CPP`, provide ETL 20.x through `CORELIB_ETL_ROOT`, and
+link `Corelib::DeviceCpp` or `Corelib::GatewayCpp` for the C++14 facade.
+
+Installed-package consumers use `find_package(Corelib 1 CONFIG REQUIRED)` and
+request the `Cpp`, `Gateway`, or `GatewayCpp` component when required.
+
+Arduino users can install a release archive or repository checkout and include
+`<Corelib.h>`. Gateway sketches define `CORELIB_ENABLE_GATEWAY=1` before the
+include. See [installation](docs/installation.md), the
+[C++ guide](docs/cpp.md), and the [Arduino guide](docs/arduino.md).
+
+## Documentation
+
+- [Introduction](docs/introduction.md)
+- [Architecture](docs/architecture.md)
+- [Transactions](docs/transactions.md)
+- [Transport and scheduling](docs/transport.md)
+- [Storage and capacity](docs/storage.md)
+- [Examples](docs/examples.md)
+- [C API reference](docs/reference/c/index.md)
+- [C++ API reference](docs/reference/cpp/index.md)
+
+The published site labels `main` as **Latest**. Numeric stable SemVer tags are
+published separately, retaining the newest patch from every minor release
+line.
+
+## Development
+
+Use Taskfile as the repository entry point:
 
 ```sh
-task quick  # Configure, build, and run the portable test suite.
-task test   # Equivalent native test entry point.
-task check  # Build with strict GCC and Clang warnings.
-task quality:format CLANG_FORMAT=clang-format-18
-task quality:format-check CLANG_FORMAT=clang-format-18
-task quality:docs
-task docs:build  # Build the public site for this checkout.
-task docs:serve  # Serve it locally at http://localhost:8000.
+task quick                 # Build and run the portable native test suite.
+task check                 # Strict GCC and Clang builds.
+task quality:format-check  # Verify owned-source formatting.
+task quality:docs          # Verify comments and generated API pages.
+task docs:build            # Build the public documentation site.
+task docs:serve            # Serve documentation at http://localhost:8000.
+task all                   # Run the complete software release gate.
 ```
-
-Tasks are grouped by purpose under `native:`, `protocol:`, `package:`,
-`arduino:`, `quality:`, and the `pico:`, `teensy:`, and `stm32:` hardware
-namespaces. Their definitions live in focused files under [`tasks`](tasks),
-while the root Taskfile contains only shared configuration and common
-workflows. Run `task --list` for the complete command catalogue.
-
-`task all` is the complete release gate. It also requires Arduino Lint, the Arm
-GNU toolchain, and an STM32CubeF4 1.28.1 checkout supplied as
-`STM32CUBE_F4_PATH`; pinned Arduino CLI and board cores are installed locally
-when needed.
-
-## Test with a Teensy 4.1
-
-The Teensy fixture exercises Corelib, USB RawHID transport, and Programmor HID
-adapter together on physical hardware. The following walkthrough targets
-Ubuntu and other Debian-based Linux systems.
-
-Install the host tools. Install [Task](https://taskfile.dev/installation/)
-using its official instructions rather than the unrelated `task` package that
-some distributions provide:
-
-```sh
-sudo apt update
-sudo apt install cmake curl tar python3-venv teensy-loader-cli
-```
-
-Install PJRC's USB permissions, reload the rules, and reconnect the Teensy:
-
-```sh
-curl -fL https://www.pjrc.com/teensy/00-teensy.rules \
-  -o /tmp/00-teensy.rules
-sudo cp /tmp/00-teensy.rules /etc/udev/rules.d/00-teensy.rules
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-Clone the core library and adapter repositories beside each other, then prepare
-the adapter's private Python test environment:
-
-```sh
-git clone <corelib-repository-url> corelib
-git clone <adapter-repository-url> programmor-adapters
-task --dir programmor-adapters/tests/test-client setup
-cd corelib
-```
-
-Connect a Teensy 4.1 over USB and run the deterministic physical test:
-
-```sh
-task teensy:test \
-  PROGRAMMOR_ADAPTERS_DIR=../programmor-adapters
-```
-
-The first run downloads Arduino CLI 1.5.1 and Teensy core 1.62.0 into the
-ignored `build/tooling` directory. No global Arduino installation is needed.
-The task builds fresh firmware, uploads it, waits for RawHID to re-enumerate,
-and runs the adapter manifest. Press the Teensy PROGRAM button once if the
-loader asks for it. Success ends with output similar to:
-
-```text
-PASS .../adapter-e2e.json: Teensy 4.1 RawHID device end-to-end
-```
-
-The test covers adapter authentication, USB discovery, PFP session and
-topology establishment, Common and Share requests, publication and read-back,
-unsupported-share handling, subscription polling, and clean disconnect. The
-firmware also runs an on-device Corelib self-test before serving requests.
-
-Use the component tasks when diagnosing a failure:
-
-```sh
-task teensy:setup   # Install or verify pinned local build tooling.
-task teensy:build   # Compile without accessing the board.
-task teensy:upload  # Build and program the connected Teensy.
-task teensy:wait    # Wait for RawHID enumeration.
-task teensy:e2e PROGRAMMOR_ADAPTERS_DIR=../programmor-adapters
-```
-
-If `teensy_loader_cli` is installed outside `PATH`, pass it explicitly as
-`TEENSY_LOADER_CLI=/path/to/teensy_loader_cli`. A loader that waits indefinitely
-usually needs one PROGRAM-button press. `Permission denied` on `hidraw` or USB
-means the PJRC udev rule is missing or the board has not been reconnected. If
-the adapter test client reports a missing `.venv`, rerun its `task setup` step.
-
-See the [Teensy fixture guide](tests/hardware/teensy41-rawhid) for fixture
-implementation details.
-
-## Integrate
-
-Choose `Device` for a single downstream device or `Gateway` for an ECU
-that is also a normal addressable device and routes one or more downstream PFP
-links. Every registered gateway link is dedicated to PFP; USB, CAN, serial,
-discovery, and bootstrap carriage remain developer-owned integrations. See the
-[gateway integration guide](docs/gateway.md) for the complete boundary.
-
-1. Provision a persistent RFC 4122 UUIDv4 in device-owned storage.
-2. Allocate Corelib context and the configured storage pools.
-3. Register transport, transaction, lifecycle, and diagnostic callbacks.
-4. Initialise the context and register its transport link.
-5. Pass each complete received frame to `corelib_receive_frame()`.
-6. Call `corelib_tick()` regularly with non-decreasing monotonic time.
-7. Complete requests with `corelib_respond()` or publish unsolicited
-   data with `corelib_publish()`.
-8. Remove the link or reset the context when the connection is invalidated.
-
-Transport drivers and device application handlers remain outside Corelib:
-
-```text
-device transport -> Corelib -> device transaction handler
-device transport <- Corelib <- response or publication
-```
-
-See the [Device](docs/device.md) and
-[transport](docs/transport.md) guides for the complete ownership contract.
-The [C++ guide](docs/cpp.md) documents ETL setup, typed callbacks,
-fixed-storage sizing, and facade lifetime rules. Arduino packaging is covered
-separately in the [Arduino guide](docs/arduino.md).
-
-An RP2040 Pico SDK 2.3.0/TinyUSB hardware fixture is available under
-[`tests/hardware/pico-hid`](tests/hardware/pico-hid). It runs an on-device Corelib
-self-test and can be exercised through the Programmor HID adapter. It remains a
-manual hardware check because CI has no attached Pico. A fully linked
-NUCLEO-F446RE CMake fixture is under
-[`tests/hardware/stm32f446re`](tests/hardware/stm32f446re).
-A Teensy 4.1 RawHID fixture with the same deterministic Common/Share model is
-available under
-[`tests/hardware/teensy41-rawhid`](tests/hardware/teensy41-rawhid).
-
-## Execution model
-
-All calls for one context are serialized and callbacks are synchronous. An
-interrupt handler should place complete frames into an application-owned queue
-or ring buffer; a main loop or owning task then calls Corelib. Corelib does not
-create tasks, queues, locks, interrupts, or timers.
-
-The send callback must attempt one complete non-blocking frame write.
-`CORELIB_SEND_BUSY` retains the queued frame for a later Corelib call;
-`CORELIB_SEND_FAILED` terminates that attempt and reports a diagnostic.
-
-## Storage
-
-Use `corelib_context_size()`, `corelib_context_alignment()`, and
-`corelib_pending_request_entry_size()` instead of duplicating internal
-sizes. Reassembly storage requires `maximum_message_size * slot_count` message
-bytes and `255 * slot_count` fragment markers. Outbound storage requires
-`64 * capacity` bytes, and transaction scratch requires
-`maximum_message_size` bytes.
 
 ## Compatibility
 
@@ -350,15 +167,6 @@ bytes and `255 * slot_count` fragment markers. Outbound storage requires
 | --- | --- | --- | --- | --- |
 | 1.0.x | 1 | 2 | C11 | C++14 with ETL 20.x |
 
-Version 1.0.0 provides the standard-node core and the separately enabled
-portable gateway component. Native verification uses GCC and Clang; package
-builds cover Arduino/Teensy, Raspberry Pi Pico SDK, and STM32Cube integrations.
+## Licence
 
-The published documentation uses `main` as **Latest**. Numeric stable SemVer
-tags are published separately, retaining the newest patch from every minor
-release line. Versioned publishing begins with the first tag containing the
-VitePress documentation toolchain; older tags are not backfilled.
-
-## License
-
-MIT
+Corelib is available under the [MIT Licence](LICENSE).
