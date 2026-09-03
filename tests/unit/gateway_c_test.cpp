@@ -534,7 +534,14 @@ TEST(GatewayCApi, HandlesDiscoveryAssignmentRoutingAndLoss) {
   EXPECT_TRUE(corelib_gateway_usage(gateway, &usage) == CORELIB_OK);
   EXPECT_TRUE(usage.routes == 8);
 
-  EXPECT_TRUE(corelib_gateway_set_link_available(gateway, 2, false) == CORELIB_OK);
+  /* A downstream send failure removes the branch without recursively flushing
+     the node-removed notifications queued for the upstream link. */
+  data.destination = 4;
+  ++data.message_id;
+  EXPECT_TRUE(corelib_pfp_encode(&data, encoded) == CORELIB_OK);
+  fixture.send_failed = 1;
+  EXPECT_TRUE(corelib_gateway_receive_frame(gateway, 1, encoded, 23) ==
+              CORELIB_INVALID_STATE);
   EXPECT_TRUE(fixture.topology_count == 16);
   EXPECT_TRUE(fixture.topology_addresses[8] == 10 && !fixture.topology_reachable[8]);
   EXPECT_TRUE(fixture.topology_addresses[15] == 3 && !fixture.topology_reachable[15]);

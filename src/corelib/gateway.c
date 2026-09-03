@@ -101,6 +101,7 @@ typedef struct {
 struct corelib_gateway_context {
   uint32_t signature;
   bool in_call;
+  bool flushing;
   uint64_t now;
   uint32_t sequence;
   uint32_t next_message;
@@ -114,6 +115,21 @@ struct corelib_gateway_context {
 
 static void clear_gateway(corelib_gateway_context_t *g, bool keep_links);
 static void remove_routes_for_link(corelib_gateway_context_t *g, corelib_link_id_t link);
+
+/**
+ * @brief Advance a wrapping counter while reserving zero as an invalid value.
+ * @param[in] value Current counter value.
+ * @return Next non-zero counter value.
+ */
+static uint32_t next_nonzero(uint32_t value) {
+  uint32_t result;
+  if (value == UINT32_MAX) {
+    result = 1u;
+  } else {
+    result = value + 1u;
+  }
+  return result;
+}
 static void clear_link_work(corelib_gateway_context_t *g, corelib_link_id_t link);
 
 _Static_assert(sizeof(gateway_link_t) <= CORELIB_GATEWAY_ENTRY_STORAGE_SIZE,
@@ -138,8 +154,40 @@ _Static_assert(sizeof(corelib_gateway_context_t) <=
  * @param[in] index Bounded storage index.
  * @return Matching internal entry, or null when none is available.
  */
-static void *entry_at(const corelib_entry_storage_t *storage, size_t index) {
-  return (uint8_t *)storage->entries + index * storage->entry_size;
+static void *entry_at(corelib_entry_storage_t *storage, size_t index) {
+  uint8_t *entries = (uint8_t *)storage->entries;
+  return (void *)&entries[index * storage->entry_size];
+}
+
+/**
+ * @brief Address a byte within caller-owned storage.
+ * @param[in,out] base Start of the validated storage region.
+ * @param[in] offset Bounded byte offset within the region.
+ * @return Address of the selected byte.
+ */
+static uint8_t *gateway_byte_at(uint8_t *base, size_t offset) {
+  return &base[offset];
+}
+
+/**
+ * @brief Test whether caller-owned storage meets an alignment requirement.
+ * @param[in] memory Storage address to test.
+ * @param[in] alignment Required power-of-two alignment.
+ * @return True when the address is suitably aligned; otherwise false.
+ */
+static bool gateway_pointer_is_aligned(const void *memory, size_t alignment) {
+  return ((uintptr_t)memory % (uintptr_t)alignment) == (uintptr_t)0u;
+}
+
+/**
+ * @brief Read-only entry at a bounded storage index.
+ * @param[in] storage Value supplied through `storage`.
+ * @param[in] index Bounded storage index.
+ * @return Matching internal entry.
+ */
+static const void *entry_at_const(const corelib_entry_storage_t *storage, size_t index) {
+  const uint8_t *entries = (const uint8_t *)storage->entries;
+  return (const void *)&entries[index * storage->entry_size];
 }
 
 /**
@@ -207,8 +255,9 @@ static gateway_link_t *find_link(corelib_gateway_context_t *g, corelib_link_id_t
   size_t i;
   for (i = 0; i < g->config.storage.links.capacity; ++i) {
     gateway_link_t *link = link_at(g, i);
-    if (link->used && link->id == id)
+    if (link->used && link->id == id) {
       return link;
+    }
   }
   return NULL;
 }
@@ -222,8 +271,9 @@ static gateway_link_t *upstream(corelib_gateway_context_t *g) {
   size_t i;
   for (i = 0; i < g->config.storage.links.capacity; ++i) {
     gateway_link_t *link = link_at(g, i);
-    if (link->used && link->role == CORELIB_LINK_UPSTREAM)
+    if (link->used && link->role == CORELIB_LINK_UPSTREAM) {
       return link;
+    }
   }
   return NULL;
 }
@@ -238,8 +288,9 @@ static gateway_route_t *find_route_address(corelib_gateway_context_t *g, uint16_
   size_t i;
   for (i = 0; i < g->config.storage.routes.capacity; ++i) {
     gateway_route_t *route = route_at(g, i);
-    if (route->used && route->address == address)
+    if (route->used && route->address == address) {
       return route;
+    }
   }
   return NULL;
 }
@@ -254,8 +305,9 @@ static gateway_route_t *find_route_uuid(corelib_gateway_context_t *g, const uint
   size_t i;
   for (i = 0; i < g->config.storage.routes.capacity; ++i) {
     gateway_route_t *route = route_at(g, i);
-    if (route->used && memcmp(route->uuid, uuid, 16) == 0)
+    if (route->used && memcmp(route->uuid, uuid, 16) == 0) {
       return route;
+    }
   }
   return NULL;
 }
@@ -281,7 +333,13 @@ static void gateway_diag(corelib_gateway_context_t *g, corelib_diagnostic_t code
  * @return Operation status.
  */
 static corelib_status_t flush(corelib_gateway_context_t *g) {
-  for (;;) {
+  corelib_status_t status = CORELIB_OK;
+  bool finished = false;
+  if (g->flushing) {
+    return CORELIB_OK;
+  }
+  g->flushing = true;
+  while (!finished) {
     gateway_forward_t *chosen = NULL;
     size_t i;
     for (i = 0; i < g->config.storage.forwarding.capacity; ++i) {
@@ -292,46 +350,51 @@ static corelib_status_t flush(corelib_gateway_context_t *g) {
         chosen = item;
       }
     }
-    if (chosen == NULL)
-      return CORELIB_OK;
-    {
+    if (chosen == NULL) {
+      finished = true;
+    } else {
       gateway_link_t *link = find_link(g, chosen->link);
-      corelib_send_result_t result;
       if (link == NULL || !link->available) {
         chosen->used = false;
-        continue;
-      }
-      {
+      } else {
         const bool entered = g->in_call;
+        corelib_send_result_t result;
         g->in_call = true;
         result = g->application_config.callbacks.send_frame(
             g->application_config.callbacks.user, link->id, link->transport,
             chosen->frame);
         g->in_call = entered;
-      }
-      if (result == CORELIB_SEND_BUSY)
-        return CORELIB_BUSY;
-      if (result == CORELIB_SEND_FAILED) {
-        const uint32_t work = chosen->work;
-        for (i = 0; i < g->config.storage.forwarding.capacity; ++i) {
-          gateway_forward_t *item = forward_at(g, i);
-          if (item->used && item->work == work)
-            item->used = false;
-        }
-        link->available = false;
-        if (link->role == CORELIB_LINK_UPSTREAM) {
-          (void)corelib_reset(g->device);
-          clear_gateway(g, true);
+        if (result == CORELIB_SEND_BUSY) {
+          status = CORELIB_BUSY;
+        } else if (result == CORELIB_SEND_FAILED) {
+          const uint32_t work = chosen->work;
+          for (i = 0; i < g->config.storage.forwarding.capacity; ++i) {
+            gateway_forward_t *item = forward_at(g, i);
+            if (item->used && item->work == work) {
+              item->used = false;
+            }
+          }
+          link->available = false;
+          if (link->role == CORELIB_LINK_UPSTREAM) {
+            (void)corelib_reset(g->device);
+            clear_gateway(g, true);
+          } else {
+            clear_link_work(g, link->id);
+            remove_routes_for_link(g, link->id);
+          }
+          gateway_diag(g, CORELIB_DIAGNOSTIC_SEND_FAILED, CORELIB_INVALID_STATE);
+          status = CORELIB_INVALID_STATE;
         } else {
-          clear_link_work(g, link->id);
-          remove_routes_for_link(g, link->id);
+          chosen->used = false;
         }
-        gateway_diag(g, CORELIB_DIAGNOSTIC_SEND_FAILED, CORELIB_INVALID_STATE);
-        return CORELIB_INVALID_STATE;
       }
-      chosen->used = false;
+    }
+    if (status != CORELIB_OK) {
+      finished = true;
     }
   }
+  g->flushing = false;
+  return status;
 }
 
 /**
@@ -346,17 +409,15 @@ static corelib_status_t queue_bytes(corelib_gateway_context_t *g, corelib_link_i
   size_t i;
   uint32_t work = 0;
   for (i = 0; i < g->config.storage.forwarding.capacity; ++i) {
-    gateway_forward_t *queued = forward_at(g, i);
+    const gateway_forward_t *queued = forward_at(g, i);
     if (queued->used && queued->origin == origin &&
-        memcmp(queued->frame + 2, bytes + 2, 12) == 0) {
+        memcmp(&queued->frame[2], &bytes[2], 12) == 0) {
       work = queued->work;
       break;
     }
   }
   if (work == 0u) {
-    ++g->next_work;
-    if (g->next_work == 0u)
-      ++g->next_work;
+    g->next_work = next_nonzero(g->next_work);
     work = g->next_work;
   }
   for (i = 0; i < g->config.storage.forwarding.capacity; ++i) {
@@ -366,9 +427,10 @@ static corelib_status_t queue_bytes(corelib_gateway_context_t *g, corelib_link_i
       item->link = link;
       item->origin = origin;
       item->work = work;
-      item->sequence = ++g->sequence;
+      ++g->sequence;
+      item->sequence = g->sequence;
       item->priority = bytes[19];
-      memcpy(item->frame, bytes, 64);
+      (void)memcpy(item->frame, bytes, 64);
       {
         const corelib_status_t status = flush(g);
         return status == CORELIB_BUSY ? CORELIB_OK : status;
@@ -385,10 +447,13 @@ static corelib_status_t queue_bytes(corelib_gateway_context_t *g, corelib_link_i
  * @return Computed size or bounded index.
  */
 static size_t free_forward_slots(corelib_gateway_context_t *g) {
-  size_t i, count = 0;
-  for (i = 0; i < g->config.storage.forwarding.capacity; ++i)
-    if (!forward_at(g, i)->used)
+  size_t i;
+  size_t count = 0;
+  for (i = 0; i < g->config.storage.forwarding.capacity; ++i) {
+    if (!forward_at(g, i)->used) {
       ++count;
+    }
+  }
   return count;
 }
 
@@ -409,9 +474,10 @@ static corelib_status_t store_bytes(corelib_gateway_context_t *g, corelib_link_i
       item->link = link;
       item->origin = 0u;
       item->work = work;
-      item->sequence = ++g->sequence;
+      ++g->sequence;
+      item->sequence = g->sequence;
       item->priority = bytes[19];
-      memcpy(item->frame, bytes, 64);
+      (void)memcpy(item->frame, bytes, 64);
       return CORELIB_OK;
     }
   }
@@ -428,11 +494,12 @@ static corelib_status_t store_bytes(corelib_gateway_context_t *g, corelib_link_i
  */
 static corelib_send_result_t local_send(void *user, corelib_link_id_t link_id, void *transport, const uint8_t frame[64]) {
   corelib_gateway_context_t *g = user;
-  gateway_link_t *up = upstream(g);
+  const gateway_link_t *up = upstream(g);
   (void)link_id;
   (void)transport;
-  if (up == NULL || !up->available)
+  if (up == NULL || !up->available) {
     return CORELIB_SEND_FAILED;
+  }
   return queue_bytes(g, up->id, frame, 0u) == CORELIB_OK
              ? CORELIB_SEND_ACCEPTED
              : CORELIB_SEND_BUSY;
@@ -447,8 +514,9 @@ static void local_transaction(void *user, const corelib_transaction_t *value) {
   corelib_gateway_context_t *g = user;
   const bool entered = g->in_call;
   g->in_call = true;
-  if (g->application_config.callbacks.transaction != NULL)
+  if (g->application_config.callbacks.transaction != NULL) {
     g->application_config.callbacks.transaction(g->application_config.callbacks.user, value);
+  }
   g->in_call = entered;
 }
 /**
@@ -462,8 +530,9 @@ static void local_session(void *user, corelib_session_state_t state, uint32_t se
   corelib_gateway_context_t *g = user;
   const bool entered = g->in_call;
   g->in_call = true;
-  if (g->application_config.callbacks.session_changed != NULL)
+  if (g->application_config.callbacks.session_changed != NULL) {
     g->application_config.callbacks.session_changed(g->application_config.callbacks.user, state, session, address);
+  }
   g->in_call = entered;
 }
 /**
@@ -477,8 +546,9 @@ static void local_node(void *user, const uint8_t uuid[16], bool reachable, uint1
   corelib_gateway_context_t *g = user;
   const bool entered = g->in_call;
   g->in_call = true;
-  if (g->application_config.callbacks.node_changed != NULL)
+  if (g->application_config.callbacks.node_changed != NULL) {
     g->application_config.callbacks.node_changed(g->application_config.callbacks.user, uuid, reachable, address);
+  }
   g->in_call = entered;
 }
 /**
@@ -547,25 +617,31 @@ typedef struct {
 static bool decode_control(const uint8_t *bytes, size_t size, uint8_t *opcode, uint32_t *transaction, control_fields_t *fields) {
   size_t offset = 8;
   uint8_t previous = 0;
-  if (size < 8 || bytes[0] != 1 || bytes[2] != 0 || bytes[3] != 0)
+  if (size < 8u || bytes[0] != 1u || bytes[2] != 0u || bytes[3] != 0u) {
     return false;
-  memset(fields, 0, sizeof(*fields));
+  }
+  (void)memset(fields, 0, sizeof(*fields));
   *opcode = bytes[1];
-  *transaction = u32(bytes + 4);
+  *transaction = u32(&bytes[4]);
   while (offset < size) {
     uint8_t encoded;
     uint8_t id;
     uint8_t length;
-    if (size - offset < 2)
+    if (size - offset < 2u) {
       return false;
-    encoded = bytes[offset++];
-    id = (uint8_t)(encoded & 0x7f);
-    length = bytes[offset++];
-    if (id == 0 || id <= previous || length == 0 || length > size - offset)
+    }
+    encoded = bytes[offset];
+    ++offset;
+    id = (uint8_t)(encoded & 0x7fu);
+    length = bytes[offset];
+    ++offset;
+    if (id == 0u || id <= previous || length == 0u || length > size - offset) {
       return false;
-    if (id > 11) {
-      if ((encoded & 0x80u) != 0)
+    }
+    if (id > 11u) {
+      if ((encoded & 0x80u) != 0u) {
         return false;
+      }
     } else {
       const bool valid_length =
           ((id == TLV_NODE_UUID || id == TLV_DISCOVERY_TOKEN) && length == 16u) ||
@@ -576,12 +652,13 @@ static bool decode_control(const uint8_t *bytes, size_t size, uint8_t *opcode, u
             id == TLV_HEARTBEAT_INTERVAL || id == TLV_OFFENDING_MESSAGE_ID) &&
            length == 4u) ||
           (id == 8u && length <= 16u &&
-           corelib_control_valid_utf8(bytes + offset, length));
-      if (!valid_length)
+           corelib_control_valid_utf8(&bytes[offset], length));
+      if (!valid_length) {
         return false;
-      fields->value[id] = bytes + offset;
+      }
+      fields->value[id] = &bytes[offset];
       fields->length[id] = length;
-      fields->critical[id] = (encoded & 0x80u) != 0;
+      fields->critical[id] = (encoded & 0x80u) != 0u;
     }
     previous = id;
     offset += length;
@@ -608,9 +685,11 @@ static bool required(const control_fields_t *f, uint8_t id, uint8_t length) {
  */
 static bool only_fields(const control_fields_t *f, uint16_t allowed) {
   uint8_t id;
-  for (id = 1; id <= 11; ++id)
-    if (f->value[id] != NULL && (allowed & (uint16_t)(1u << id)) == 0u)
+  for (id = 1u; id <= 11u; ++id) {
+    if (f->value[id] != NULL && (allowed & (uint16_t)((uint16_t)1u << id)) == 0u) {
       return false;
+    }
+  }
   return true;
 }
 
@@ -622,10 +701,10 @@ static bool only_fields(const control_fields_t *f, uint16_t allowed) {
  * @return Computed size or bounded index.
  */
 static size_t ctl_header(uint8_t *out, uint8_t opcode, uint32_t transaction) {
-  memset(out, 0, 8);
+  (void)memset(out, 0, 8);
   out[0] = 1;
   out[1] = opcode;
-  w32(out + 4, transaction);
+  w32(&out[4], transaction);
   return 8;
 }
 /**
@@ -639,10 +718,13 @@ static size_t ctl_header(uint8_t *out, uint8_t opcode, uint32_t transaction) {
  * @return Computed size or bounded index.
  */
 static size_t tlv(uint8_t *out, size_t offset, uint8_t id, bool critical, const void *value, uint8_t length) {
-  out[offset++] = (uint8_t)(id | (critical ? 0x80u : 0u));
-  out[offset++] = length;
-  memcpy(out + offset, value, length);
-  return offset + length;
+  size_t cursor = offset;
+  out[cursor] = (uint8_t)(id | (critical ? 0x80u : 0u));
+  ++cursor;
+  out[cursor] = length;
+  ++cursor;
+  (void)memcpy(&out[cursor], value, length);
+  return cursor + length;
 }
 /**
  * @brief Tlv16.
@@ -687,10 +769,13 @@ static corelib_status_t enqueue_control(corelib_gateway_context_t *g, corelib_li
   corelib_pfp_frame_t frame;
   size_t index;
   const size_t count = (size + 39u) / 40u;
-  const uint32_t message_id = ++g->next_message == 0 ? ++g->next_message : g->next_message;
-  if (count == 0 || count > 255 || size > UINT16_MAX)
+  uint32_t message_id;
+  g->next_message = next_nonzero(g->next_message);
+  message_id = g->next_message;
+  if (count == 0u || count > 255u || size > UINT16_MAX) {
     return CORELIB_INVALID_ARGUMENT;
-  memset(&frame, 0, sizeof(frame));
+  }
+  (void)memset(&frame, 0, sizeof(frame));
   frame.type = CORELIB_PFP_CONTROL;
   frame.destination = destination;
   frame.source = source;
@@ -702,19 +787,22 @@ static corelib_status_t enqueue_control(corelib_gateway_context_t *g, corelib_li
   frame.priority = CORELIB_DEFAULT_PRIORITY;
   for (index = 0; index < count; ++index) {
     uint8_t encoded[64];
-    const size_t offset = index * 40;
+    const size_t offset = index * 40u;
     size_t chunk = size - offset;
-    if (chunk > 40)
-      chunk = 40;
-    frame.frame_index = (uint8_t)(index + 1);
-    memset(frame.payload, 0, 40);
-    memcpy(frame.payload, message + offset, chunk);
-    if (corelib_pfp_encode(&frame, encoded) != CORELIB_OK)
+    if (chunk > 40u) {
+      chunk = 40u;
+    }
+    frame.frame_index = (uint8_t)(index + 1u);
+    (void)memset(frame.payload, 0, 40u);
+    (void)memcpy(frame.payload, &message[offset], chunk);
+    if (corelib_pfp_encode(&frame, encoded) != CORELIB_OK) {
       return CORELIB_INVALID_FRAME;
+    }
     {
       corelib_status_t status = store_bytes(g, link, encoded, work);
-      if (status != CORELIB_OK)
+      if (status != CORELIB_OK) {
         return status;
+      }
     }
   }
   return CORELIB_OK;
@@ -730,11 +818,12 @@ static corelib_status_t enqueue_control(corelib_gateway_context_t *g, corelib_li
  * @return Operation status.
  */
 static corelib_status_t send_control(corelib_gateway_context_t *g, corelib_link_id_t link, uint16_t destination, const uint8_t *message, size_t size) {
-  const uint32_t work = g->next_message + 1u == 0u ? 1u : g->next_message + 1u;
+  const uint32_t work = next_nonzero(g->next_message);
   corelib_status_t status = enqueue_control(
       g, link, destination, g->device->local_address, message, size, work);
-  if (status != CORELIB_OK)
+  if (status != CORELIB_OK) {
     return status;
+  }
   status = flush(g);
   return status == CORELIB_BUSY ? CORELIB_OK : status;
 }
@@ -749,11 +838,12 @@ static corelib_status_t send_control(corelib_gateway_context_t *g, corelib_link_
  * @return Operation status.
  */
 static corelib_status_t send_control_as_root(corelib_gateway_context_t *g, corelib_link_id_t link, uint16_t destination, const uint8_t *message, size_t size) {
-  const uint32_t work = g->next_message + 1u == 0u ? 1u : g->next_message + 1u;
+  const uint32_t work = next_nonzero(g->next_message);
   corelib_status_t status = enqueue_control(
       g, link, destination, CORELIB_ROOT_ADDRESS, message, size, work);
-  if (status != CORELIB_OK)
+  if (status != CORELIB_OK) {
     return status;
+  }
   status = flush(g);
   return status == CORELIB_BUSY ? CORELIB_OK : status;
 }
@@ -763,7 +853,7 @@ static corelib_status_t send_control_as_root(corelib_gateway_context_t *g, corel
  * @param[in,out] g Gateway context used by the operation.
  * @return Computed internal value.
  */
-static uint16_t upstream_peer(corelib_gateway_context_t *g) {
+static uint16_t upstream_peer(const corelib_gateway_context_t *g) {
   return g->upstream_peer_address;
 }
 
@@ -776,8 +866,8 @@ static uint16_t upstream_peer(corelib_gateway_context_t *g) {
 static void topology(corelib_gateway_context_t *g, const gateway_route_t *route, bool reachable) {
   if (g->config.callbacks.topology_changed != NULL) {
     corelib_topology_event_t event;
-    memset(&event, 0, sizeof(event));
-    memcpy(event.node_uuid, route->uuid, 16);
+    (void)memset(&event, 0, sizeof(event));
+    (void)memcpy(event.node_uuid, route->uuid, 16);
     event.capabilities = route->capabilities;
     event.node_address = route->address;
     event.parent_address = route->parent;
@@ -800,8 +890,9 @@ static gateway_route_t *allocate_route(corelib_gateway_context_t *g) {
   size_t i;
   for (i = 0; i < g->config.storage.routes.capacity; ++i) {
     gateway_route_t *route = route_at(g, i);
-    if (!route->used)
+    if (!route->used) {
       return route;
+    }
   }
   return NULL;
 }
@@ -816,7 +907,7 @@ static gateway_route_t *allocate_route(corelib_gateway_context_t *g) {
 static corelib_status_t relay_ready(corelib_gateway_context_t *g, const gateway_route_t *route, uint32_t transaction) {
   uint8_t message[64];
   size_t n = ctl_header(message, CONTROL_NODE_READY, transaction);
-  gateway_link_t *up = upstream(g);
+  const gateway_link_t *up = upstream(g);
   n = tlv(message, n, TLV_NODE_UUID, true, route->uuid, 16);
   n = tlv16(message, n, TLV_NODE_ADDRESS, route->address);
   n = tlv16(message, n, TLV_PARENT_ADDRESS, route->parent);
@@ -833,17 +924,19 @@ static corelib_status_t relay_ready(corelib_gateway_context_t *g, const gateway_
  * @param[in] status Value supplied through `status`.
  */
 static void emit_removed(corelib_gateway_context_t *g, const gateway_route_t *route, uint16_t status) {
-  gateway_link_t *up = upstream(g);
+  const gateway_link_t *up = upstream(g);
   uint8_t message[64];
   size_t n;
-  if (up == NULL || !up->available || g->device->session_state == CORELIB_SESSION_INACTIVE)
+  if (up == NULL || !up->available || g->device->session_state == CORELIB_SESSION_INACTIVE) {
     return;
+  }
   n = ctl_header(message, CONTROL_NODE_REMOVED, 0);
   n = tlv(message, n, TLV_NODE_UUID, true, route->uuid, 16);
   n = tlv16(message, n, TLV_NODE_ADDRESS, route->address);
   n = tlv16(message, n, TLV_PARENT_ADDRESS, route->parent);
   n = tlv16(message, n, TLV_STATUS, status);
-  (void)send_control(g, up->id, upstream_peer(g), message, n);
+  (void)enqueue_control(g, up->id, upstream_peer(g), g->device->local_address,
+                        message, n, next_nonzero(g->next_message));
 }
 
 /**
@@ -853,18 +946,20 @@ static void emit_removed(corelib_gateway_context_t *g, const gateway_route_t *ro
  * @param[in] status Value supplied through `status`.
  */
 static void send_route_error(corelib_gateway_context_t *g, const corelib_pfp_frame_t *offending, uint16_t status) {
-  gateway_link_t *egress = NULL;
+  const gateway_link_t *egress = NULL;
   uint8_t message[32];
   size_t n;
-  if (offending->source == CORELIB_ROOT_ADDRESS)
+  if (offending->source == CORELIB_ROOT_ADDRESS) {
     egress = upstream(g);
-  else {
-    gateway_route_t *reverse = find_route_address(g, offending->source);
-    if (reverse != NULL && reverse->state == CORELIB_ROUTE_READY)
+  } else {
+    const gateway_route_t *reverse = find_route_address(g, offending->source);
+    if (reverse != NULL && reverse->state == CORELIB_ROUTE_READY) {
       egress = find_link(g, reverse->next_link);
+    }
   }
-  if (egress == NULL || !egress->available)
+  if (egress == NULL || !egress->available) {
     return;
+  }
   n = ctl_header(message, CONTROL_ROUTE_ERROR, 0);
   n = tlv16(message, n, TLV_STATUS, status);
   n = tlv32(message, n, TLV_OFFENDING_MESSAGE_ID, offending->message_id, true);
@@ -884,14 +979,18 @@ static void send_control_error(corelib_gateway_context_t *g, corelib_link_id_t i
   uint8_t message[32];
   uint16_t control_status = CORELIB_CONTROL_MALFORMED;
   size_t n;
-  if (g->device->session_state == CORELIB_SESSION_INACTIVE)
+  if (g->device->session_state == CORELIB_SESSION_INACTIVE) {
     return;
-  if (failure == CORELIB_UNSUPPORTED)
+  }
+  if (failure == CORELIB_UNSUPPORTED) {
     control_status = CORELIB_CONTROL_UNSUPPORTED;
-  else if (failure == CORELIB_CAPACITY_EXCEEDED)
+  } else if (failure == CORELIB_CAPACITY_EXCEEDED) {
     control_status = CORELIB_CONTROL_RESOURCE_LIMIT;
-  else if (failure == CORELIB_INVALID_STATE)
+  } else if (failure == CORELIB_INVALID_STATE) {
     control_status = CORELIB_CONTROL_CONFLICT;
+  } else {
+    /* Retain the malformed status for all other validation failures. */
+  }
   n = ctl_header(message, CONTROL_CONTROL_ERROR, transaction);
   n = tlv16(message, n, TLV_STATUS, control_status);
   n = tlv32(message, n, TLV_OFFENDING_MESSAGE_ID, offending_message, true);
@@ -912,83 +1011,94 @@ static corelib_status_t process_gateway_control(corelib_gateway_context_t *g, co
   control_fields_t f;
   uint8_t opcode;
   uint32_t transaction;
-  if (!decode_control(bytes, size, &opcode, &transaction, &f))
+  if (!decode_control(bytes, size, &opcode, &transaction, &f)) {
     return CORELIB_INVALID_FRAME;
+  }
   if (opcode == 1u || opcode == 8u || opcode == CONTROL_SESSION_END) {
-    if (opcode == 1u && source != CORELIB_ROOT_ADDRESS)
+    if (opcode == 1u && source != CORELIB_ROOT_ADDRESS) {
       return CORELIB_INVALID_FRAME;
+    }
     if (opcode == CONTROL_SESSION_END) {
       size_t i;
-      if (source != CORELIB_ROOT_ADDRESS)
+      if (source != CORELIB_ROOT_ADDRESS) {
         return CORELIB_INVALID_FRAME;
+      }
       for (i = 0; i < g->config.storage.routes.capacity; ++i) {
-        gateway_route_t *route = route_at(g, i);
+        const gateway_route_t *route = route_at(g, i);
         if (route->used && route->state == CORELIB_ROUTE_READY &&
             route->depth == 1u) {
-          gateway_link_t *link = find_link(g, route->next_link);
-          if (link != NULL && link->available)
+          const gateway_link_t *link = find_link(g, route->next_link);
+          if (link != NULL && link->available) {
             (void)send_control_as_root(g, link->id, route->address, bytes, size);
+          }
         }
       }
     }
     const corelib_status_t status = corelib_process_control_message(
         g->device, bytes, size, frame_session);
-    if (status == CORELIB_OK && opcode == CONTROL_SESSION_END)
+    if (status == CORELIB_OK && opcode == CONTROL_SESSION_END) {
       clear_gateway(g, true);
+    }
     return status;
   }
   if (opcode == CONTROL_ROUTE_ERROR || opcode == CONTROL_CONTROL_ERROR) {
     if ((opcode == CONTROL_ROUTE_ERROR && transaction != 0u) ||
         !required(&f, TLV_STATUS, 2) ||
         !required(&f, TLV_OFFENDING_MESSAGE_ID, 4) ||
-        !only_fields(&f, (uint16_t)((1u << TLV_STATUS) |
-                                    (1u << 8u) |
-                                    (1u << TLV_OFFENDING_MESSAGE_ID))) ||
-        (f.value[8] != NULL && f.critical[8]))
+        !only_fields(&f, (uint16_t)(((uint16_t)1u << TLV_STATUS) |
+                                    ((uint16_t)1u << 8u) |
+                                    ((uint16_t)1u << TLV_OFFENDING_MESSAGE_ID))) ||
+        (f.value[8] != NULL && f.critical[8])) {
       return CORELIB_INVALID_FRAME;
+    }
     return CORELIB_OK;
   }
   if (opcode == CONTROL_DISCOVER) {
     size_t i;
     bool selected = false;
-    gateway_link_t *source_link = find_link(g, ingress);
+    const gateway_link_t *source_link = find_link(g, ingress);
     if (source_link == NULL || source_link->role != CORELIB_LINK_UPSTREAM ||
         source != CORELIB_ROOT_ADDRESS ||
-        transaction == 0 || !required(&f, TLV_DISCOVERY_TOKEN, 16) ||
-        !only_fields(&f, (uint16_t)((1u << TLV_LINK_ID) |
-                                    (1u << TLV_LINK_PROFILE_ID) |
-                                    (1u << TLV_DISCOVERY_TOKEN))) ||
+        transaction == 0u || !required(&f, TLV_DISCOVERY_TOKEN, 16u) ||
+        !only_fields(&f, (uint16_t)(((uint16_t)1u << TLV_LINK_ID) |
+                                    ((uint16_t)1u << TLV_LINK_PROFILE_ID) |
+                                    ((uint16_t)1u << TLV_DISCOVERY_TOKEN))) ||
         (f.value[TLV_LINK_ID] != NULL &&
-         (f.length[TLV_LINK_ID] != 2 || f.critical[TLV_LINK_ID])) ||
+         (f.length[TLV_LINK_ID] != 2u || f.critical[TLV_LINK_ID])) ||
         (f.value[TLV_LINK_PROFILE_ID] != NULL &&
-         (f.length[TLV_LINK_PROFILE_ID] != 4 || f.critical[TLV_LINK_PROFILE_ID])))
+         (f.length[TLV_LINK_PROFILE_ID] != 4u || f.critical[TLV_LINK_PROFILE_ID]))) {
       return CORELIB_INVALID_FRAME;
+    }
     for (i = 0; i < g->config.storage.links.capacity; ++i) {
       gateway_link_t *link = link_at(g, i);
       gateway_discovery_t *round = NULL;
       size_t j;
-      if (!link->used || !link->available || link->role != CORELIB_LINK_DOWNSTREAM)
+      if (!link->used || !link->available || link->role != CORELIB_LINK_DOWNSTREAM) {
         continue;
+      }
       if (f.value[TLV_LINK_ID] != NULL &&
-          (f.length[TLV_LINK_ID] != 2 || u16(f.value[TLV_LINK_ID]) != link->id))
+          (f.length[TLV_LINK_ID] != 2u || u16(f.value[TLV_LINK_ID]) != link->id)) {
         continue;
+      }
       if (f.value[TLV_LINK_PROFILE_ID] != NULL &&
-          (f.length[TLV_LINK_PROFILE_ID] != 4 ||
-           u32(f.value[TLV_LINK_PROFILE_ID]) != link->profile))
+          (f.length[TLV_LINK_PROFILE_ID] != 4u ||
+           u32(f.value[TLV_LINK_PROFILE_ID]) != link->profile)) {
         continue;
+      }
       for (j = 0; j < g->config.storage.discoveries.capacity; ++j) {
         if (!discovery_at(g, j)->used) {
           round = discovery_at(g, j);
           break;
         }
       }
-      if (round == NULL)
+      if (round == NULL) {
         return CORELIB_CAPACITY_EXCEEDED;
-      memset(round, 0, sizeof(*round));
+      }
+      (void)memset(round, 0, sizeof(*round));
       round->used = true;
       round->link = link->id;
       round->callback_pending = true;
-      memcpy(round->token, f.value[TLV_DISCOVERY_TOKEN], 16);
+      (void)memcpy(round->token, f.value[TLV_DISCOVERY_TOKEN], 16);
       round->deadline = g->now + g->config.discovery_timeout_ms;
       selected = true;
       if (g->config.callbacks.discover != NULL) {
@@ -999,10 +1109,13 @@ static corelib_status_t process_gateway_control(corelib_gateway_context_t *g, co
             g->application_config.callbacks.user, link->id, link->transport,
             link->profile, round->token);
         g->in_call = entered;
-        if (result == CORELIB_SEND_FAILED)
+        if (result == CORELIB_SEND_FAILED) {
           round->used = false;
-        else if (result == CORELIB_SEND_ACCEPTED)
+        } else if (result == CORELIB_SEND_ACCEPTED) {
           round->callback_pending = false;
+        } else {
+          /* Leave a busy callback pending for a later tick. */
+        }
       }
     }
     (void)ingress;
@@ -1013,20 +1126,21 @@ static corelib_status_t process_gateway_control(corelib_gateway_context_t *g, co
     gateway_assignment_t *pending = NULL;
     gateway_candidate_t *candidate = NULL;
     gateway_link_t *link;
-    gateway_link_t *source_link = find_link(g, ingress);
+    const gateway_link_t *source_link = find_link(g, ingress);
     if (source_link == NULL || source_link->role != CORELIB_LINK_UPSTREAM ||
         source != CORELIB_ROOT_ADDRESS ||
-        transaction == 0 || !required(&f, TLV_NODE_UUID, 16) ||
+        transaction == 0u || !required(&f, TLV_NODE_UUID, 16u) ||
         !required(&f, TLV_NODE_ADDRESS, 2) ||
         !required(&f, TLV_PARENT_ADDRESS, 2) ||
         !required(&f, TLV_LINK_ID, 2) ||
         !required(&f, TLV_HEARTBEAT_INTERVAL, 4) ||
-        !only_fields(&f, (uint16_t)((1u << TLV_NODE_UUID) |
-                                    (1u << TLV_NODE_ADDRESS) |
-                                    (1u << TLV_PARENT_ADDRESS) |
-                                    (1u << TLV_LINK_ID) |
-                                    (1u << TLV_HEARTBEAT_INTERVAL))))
+        !only_fields(&f, (uint16_t)(((uint16_t)1u << TLV_NODE_UUID) |
+                                    ((uint16_t)1u << TLV_NODE_ADDRESS) |
+                                    ((uint16_t)1u << TLV_PARENT_ADDRESS) |
+                                    ((uint16_t)1u << TLV_LINK_ID) |
+                                    ((uint16_t)1u << TLV_HEARTBEAT_INTERVAL)))) {
       return CORELIB_INVALID_FRAME;
+    }
     for (i = 0; i < g->config.storage.candidates.capacity; ++i) {
       gateway_candidate_t *c = candidate_at(g, i);
       if (c->used && memcmp(c->uuid, f.value[TLV_NODE_UUID], 16) == 0 &&
@@ -1035,26 +1149,30 @@ static corelib_status_t process_gateway_control(corelib_gateway_context_t *g, co
         break;
       }
     }
-    if (candidate == NULL)
+    if (candidate == NULL) {
       return CORELIB_NOT_FOUND;
+    }
     if (find_route_uuid(g, candidate->uuid) != NULL ||
-        find_route_address(g, u16(f.value[TLV_NODE_ADDRESS])) != NULL)
+        find_route_address(g, u16(f.value[TLV_NODE_ADDRESS])) != NULL) {
       return CORELIB_INVALID_STATE;
+    }
     for (i = 0; i < g->config.storage.assignments.capacity; ++i) {
       if (!assignment_at(g, i)->used) {
         pending = assignment_at(g, i);
         break;
       }
     }
-    if (pending == NULL)
+    if (pending == NULL) {
       return CORELIB_CAPACITY_EXCEEDED;
+    }
     link = find_link(g, candidate->link);
-    if (link == NULL || !link->available)
+    if (link == NULL || !link->available) {
       return CORELIB_NOT_FOUND;
-    memset(pending, 0, sizeof(*pending));
+    }
+    (void)memset(pending, 0, sizeof(*pending));
     pending->used = true;
     pending->callback_pending = true;
-    memcpy(pending->value.node_uuid, candidate->uuid, 16);
+    (void)memcpy(pending->value.node_uuid, candidate->uuid, 16);
     pending->value.session_id = g->device->session_id;
     pending->value.transaction_id = transaction;
     pending->value.node_address = u16(f.value[TLV_NODE_ADDRESS]);
@@ -1063,8 +1181,9 @@ static corelib_status_t process_gateway_control(corelib_gateway_context_t *g, co
     pending->value.heartbeat_interval_ms = u32(f.value[TLV_HEARTBEAT_INTERVAL]);
     pending->capabilities = candidate->capabilities;
     pending->deadline = g->now + g->config.assignment_timeout_ms;
-    if (g->config.callbacks.bootstrap_assign == NULL)
+    if (g->config.callbacks.bootstrap_assign == NULL) {
       return CORELIB_UNSUPPORTED;
+    }
     {
       const bool entered = g->in_call;
       corelib_send_result_t callback_result;
@@ -1076,47 +1195,54 @@ static corelib_status_t process_gateway_control(corelib_gateway_context_t *g, co
         pending->used = false;
         return CORELIB_INVALID_STATE;
       }
-      if (callback_result == CORELIB_SEND_ACCEPTED)
+      if (callback_result == CORELIB_SEND_ACCEPTED) {
         pending->callback_pending = false;
+      }
     }
     return CORELIB_OK;
   }
   if (opcode == CONTROL_NODE_READY) {
     gateway_route_t *route;
-    gateway_route_t *parent;
+    const gateway_route_t *parent;
     uint8_t depth;
-    gateway_link_t *source_link = find_link(g, ingress);
+    const gateway_link_t *source_link = find_link(g, ingress);
     if (source_link == NULL || source_link->role != CORELIB_LINK_DOWNSTREAM ||
         !required(&f, TLV_NODE_UUID, 16) || !required(&f, TLV_NODE_ADDRESS, 2) ||
         !required(&f, TLV_PARENT_ADDRESS, 2) || !required(&f, TLV_CAPABILITIES, 4) ||
-        !required(&f, TLV_STATUS, 2) || u16(f.value[TLV_STATUS]) != 0 ||
-        !only_fields(&f, (uint16_t)((1u << TLV_NODE_UUID) |
-                                    (1u << TLV_NODE_ADDRESS) |
-                                    (1u << TLV_PARENT_ADDRESS) |
-                                    (1u << TLV_CAPABILITIES) |
-                                    (1u << TLV_STATUS))))
+        !required(&f, TLV_STATUS, 2u) || u16(f.value[TLV_STATUS]) != 0u ||
+        !only_fields(&f, (uint16_t)(((uint16_t)1u << TLV_NODE_UUID) |
+                                    ((uint16_t)1u << TLV_NODE_ADDRESS) |
+                                    ((uint16_t)1u << TLV_PARENT_ADDRESS) |
+                                    ((uint16_t)1u << TLV_CAPABILITIES) |
+                                    ((uint16_t)1u << TLV_STATUS)))) {
       return CORELIB_INVALID_FRAME;
+    }
     route = find_route_uuid(g, f.value[TLV_NODE_UUID]);
     if (route != NULL) {
       if (route->address == u16(f.value[TLV_NODE_ADDRESS]) &&
-          route->parent == u16(f.value[TLV_PARENT_ADDRESS]) && route->next_link == ingress)
+          route->parent == u16(f.value[TLV_PARENT_ADDRESS]) && route->next_link == ingress) {
         return CORELIB_OK;
+      }
       return CORELIB_INVALID_STATE;
     }
-    if (find_route_address(g, u16(f.value[TLV_NODE_ADDRESS])) != NULL)
+    if (find_route_address(g, u16(f.value[TLV_NODE_ADDRESS])) != NULL) {
       return CORELIB_INVALID_STATE;
+    }
     parent = find_route_address(g, u16(f.value[TLV_PARENT_ADDRESS]));
-    if (parent == NULL && u16(f.value[TLV_PARENT_ADDRESS]) != g->device->local_address)
+    if (parent == NULL && u16(f.value[TLV_PARENT_ADDRESS]) != g->device->local_address) {
       return CORELIB_NOT_FOUND;
+    }
     depth = (uint8_t)(parent == NULL ? 1u : (uint8_t)(parent->depth + 1u));
-    if (depth > 8u)
+    if (depth > 8u) {
       return CORELIB_INVALID_STATE;
+    }
     route = allocate_route(g);
-    if (route == NULL)
+    if (route == NULL) {
       return CORELIB_CAPACITY_EXCEEDED;
-    memset(route, 0, sizeof(*route));
+    }
+    (void)memset(route, 0, sizeof(*route));
     route->used = true;
-    memcpy(route->uuid, f.value[TLV_NODE_UUID], 16);
+    (void)memcpy(route->uuid, f.value[TLV_NODE_UUID], 16);
     route->address = u16(f.value[TLV_NODE_ADDRESS]);
     route->parent = u16(f.value[TLV_PARENT_ADDRESS]);
     route->capabilities = u32(f.value[TLV_CAPABILITIES]);
@@ -1127,19 +1253,21 @@ static corelib_status_t process_gateway_control(corelib_gateway_context_t *g, co
     return relay_ready(g, route, transaction);
   }
   if (opcode == CONTROL_NODE_REMOVED) {
-    gateway_route_t *route;
-    gateway_link_t *source_link = find_link(g, ingress);
+    const gateway_route_t *route;
+    const gateway_link_t *source_link = find_link(g, ingress);
     if (source_link == NULL || source_link->role != CORELIB_LINK_DOWNSTREAM ||
         !required(&f, TLV_NODE_UUID, 16) || !required(&f, TLV_NODE_ADDRESS, 2) ||
         !required(&f, TLV_PARENT_ADDRESS, 2) || !required(&f, TLV_STATUS, 2) ||
-        !only_fields(&f, (uint16_t)((1u << TLV_NODE_UUID) |
-                                    (1u << TLV_NODE_ADDRESS) |
-                                    (1u << TLV_PARENT_ADDRESS) |
-                                    (1u << TLV_STATUS) | (1u << 8))))
+        !only_fields(&f, (uint16_t)(((uint16_t)1u << TLV_NODE_UUID) |
+                                    ((uint16_t)1u << TLV_NODE_ADDRESS) |
+                                    ((uint16_t)1u << TLV_PARENT_ADDRESS) |
+                                    ((uint16_t)1u << TLV_STATUS) | ((uint16_t)1u << 8)))) {
       return CORELIB_INVALID_FRAME;
+    }
     route = find_route_uuid(g, f.value[TLV_NODE_UUID]);
-    if (route == NULL)
+    if (route == NULL) {
       return CORELIB_OK;
+    }
     return corelib_gateway_report_node_lost(g, f.value[TLV_NODE_UUID]);
   }
   return CORELIB_UNSUPPORTED;
@@ -1154,7 +1282,10 @@ static corelib_status_t process_gateway_control(corelib_gateway_context_t *g, co
  */
 static corelib_status_t accept_control_fragment(corelib_gateway_context_t *g, corelib_link_id_t ingress, const corelib_pfp_frame_t *frame) {
   gateway_control_assembly_t *assembly = NULL;
-  size_t slot = 0, i, offset, chunk;
+  size_t slot = 0;
+  size_t i;
+  size_t offset;
+  size_t chunk;
   uint8_t *message;
   uint8_t *received;
   for (i = 0; i < g->config.storage.control_reassembly_slots; ++i) {
@@ -1171,13 +1302,14 @@ static corelib_status_t accept_control_fragment(corelib_gateway_context_t *g, co
       slot = i;
     }
   }
-  if (assembly == NULL || frame->message_length > g->config.storage.maximum_control_message_size)
+  if (assembly == NULL || frame->message_length > g->config.storage.maximum_control_message_size) {
     return CORELIB_CAPACITY_EXCEEDED;
-  message = g->config.storage.control_reassembly.message +
-            slot * g->config.storage.maximum_control_message_size;
-  received = g->config.storage.control_reassembly.received + slot * 255;
+  }
+  message = gateway_byte_at(g->config.storage.control_reassembly.message,
+                            slot * g->config.storage.maximum_control_message_size);
+  received = gateway_byte_at(g->config.storage.control_reassembly.received, slot * 255u);
   if (!assembly->used) {
-    memset(assembly, 0, sizeof(*assembly));
+    (void)memset(assembly, 0, sizeof(*assembly));
     assembly->used = true;
     assembly->session = frame->session_id;
     assembly->message_id = frame->message_id;
@@ -1188,29 +1320,34 @@ static corelib_status_t accept_control_fragment(corelib_gateway_context_t *g, co
     assembly->priority = frame->priority;
     assembly->hop = frame->hop_limit;
     assembly->started = g->now;
-    memset(received, 0, 255);
+    (void)memset(received, 0, 255);
   } else if (assembly->length != frame->message_length ||
              assembly->count != frame->frame_count || assembly->priority != frame->priority ||
              assembly->hop != frame->hop_limit) {
     assembly->used = false;
     return CORELIB_INVALID_FRAME;
+  } else {
+    /* Continue receiving a fragment for the matching assembly. */
   }
-  offset = ((size_t)frame->frame_index - 1) * 40;
+  offset = ((size_t)frame->frame_index - 1u) * 40u;
   chunk = assembly->length - offset;
-  if (chunk > 40)
-    chunk = 40;
-  if (received[frame->frame_index - 1] != 0) {
-    if (memcmp(message + offset, frame->payload, chunk) != 0) {
+  if (chunk > 40u) {
+    chunk = 40u;
+  }
+  if (received[frame->frame_index - 1u] != 0u) {
+    if (memcmp(&message[offset], frame->payload, chunk) != 0) {
       assembly->used = false;
       return CORELIB_INVALID_FRAME;
     }
     return CORELIB_OK;
   }
-  memcpy(message + offset, frame->payload, chunk);
-  received[frame->frame_index - 1] = 1;
-  for (i = 0; i < assembly->count; ++i)
-    if (!received[i])
+  (void)memcpy(&message[offset], frame->payload, chunk);
+  received[frame->frame_index - 1u] = 1u;
+  for (i = 0; i < assembly->count; ++i) {
+    if (!received[i]) {
       return CORELIB_OK;
+    }
+  }
   {
     const size_t completed_length = assembly->length;
     const uint32_t completed_session = assembly->session;
@@ -1219,7 +1356,7 @@ static corelib_status_t accept_control_fragment(corelib_gateway_context_t *g, co
         g, ingress, assembly->source, message, completed_length,
         completed_session);
     if (status != CORELIB_OK) {
-      const uint32_t transaction = completed_length >= 8u ? u32(message + 4) : 0u;
+      const uint32_t transaction = completed_length >= 8u ? u32(&message[4]) : 0u;
       send_control_error(g, ingress, assembly->source, transaction, assembly->message_id, status);
     }
     return status;
@@ -1241,29 +1378,38 @@ static void clear_gateway(corelib_gateway_context_t *g, bool keep_links) {
         gateway_route_t *route = route_at(g, i);
         if (route->used && route->state == CORELIB_ROUTE_READY &&
             route->depth == (uint8_t)depth &&
-            (selected == NULL || route->address < selected->address))
+            (selected == NULL || route->address < selected->address)) {
           selected = route;
+        }
       }
-      if (selected == NULL)
+      if (selected == NULL) {
         break;
+      }
       topology(g, selected, false);
       selected->used = false;
     }
   }
-  memset(g->assemblies, 0, sizeof(g->assemblies));
-  for (i = 0; i < g->config.storage.routes.capacity; ++i)
-    memset(route_at(g, i), 0, sizeof(gateway_route_t));
-  for (i = 0; i < g->config.storage.discoveries.capacity; ++i)
-    memset(discovery_at(g, i), 0, sizeof(gateway_discovery_t));
-  for (i = 0; i < g->config.storage.candidates.capacity; ++i)
-    memset(candidate_at(g, i), 0, sizeof(gateway_candidate_t));
-  for (i = 0; i < g->config.storage.assignments.capacity; ++i)
-    memset(assignment_at(g, i), 0, sizeof(gateway_assignment_t));
-  for (i = 0; i < g->config.storage.forwarding.capacity; ++i)
-    memset(forward_at(g, i), 0, sizeof(gateway_forward_t));
-  if (!keep_links)
-    for (i = 0; i < g->config.storage.links.capacity; ++i)
-      memset(link_at(g, i), 0, sizeof(gateway_link_t));
+  (void)memset(g->assemblies, 0, sizeof(g->assemblies));
+  for (i = 0; i < g->config.storage.routes.capacity; ++i) {
+    (void)memset(route_at(g, i), 0, sizeof(gateway_route_t));
+  }
+  for (i = 0; i < g->config.storage.discoveries.capacity; ++i) {
+    (void)memset(discovery_at(g, i), 0, sizeof(gateway_discovery_t));
+  }
+  for (i = 0; i < g->config.storage.candidates.capacity; ++i) {
+    (void)memset(candidate_at(g, i), 0, sizeof(gateway_candidate_t));
+  }
+  for (i = 0; i < g->config.storage.assignments.capacity; ++i) {
+    (void)memset(assignment_at(g, i), 0, sizeof(gateway_assignment_t));
+  }
+  for (i = 0; i < g->config.storage.forwarding.capacity; ++i) {
+    (void)memset(forward_at(g, i), 0, sizeof(gateway_forward_t));
+  }
+  if (!keep_links) {
+    for (i = 0; i < g->config.storage.links.capacity; ++i) {
+      (void)memset(link_at(g, i), 0, sizeof(gateway_link_t));
+    }
+  }
 }
 
 /**
@@ -1272,7 +1418,7 @@ static void clear_gateway(corelib_gateway_context_t *g, bool keep_links) {
  * @return True when the condition or operation succeeds; otherwise false.
  */
 static bool valid_store(const corelib_entry_storage_t *s) {
-  return s->entries != NULL && s->capacity != 0 &&
+  return s->entries != NULL && s->capacity != 0u &&
          s->entry_size >= CORELIB_GATEWAY_ENTRY_STORAGE_SIZE &&
          (uintptr_t)s->entries % alignof(max_align_t) == 0 &&
          s->entry_size % alignof(max_align_t) == 0;
@@ -1293,7 +1439,7 @@ corelib_status_t corelib_gateway_init(void *memory, size_t memory_size, const co
   corelib_config_t local;
   if (memory == NULL || config == NULL || out == NULL ||
       memory_size < sizeof(corelib_gateway_context_t) ||
-      (uintptr_t)memory % alignof(corelib_gateway_context_t) != 0 ||
+      !gateway_pointer_is_aligned(memory, corelib_gateway_context_alignment()) ||
       config->device.callbacks.send_frame == NULL ||
       config->storage.device_context_memory == NULL ||
       !valid_store(&config->storage.links) || !valid_store(&config->storage.routes) ||
@@ -1301,17 +1447,19 @@ corelib_status_t corelib_gateway_init(void *memory, size_t memory_size, const co
       !valid_store(&config->storage.assignments) || !valid_store(&config->storage.forwarding) ||
       config->storage.control_reassembly.message == NULL ||
       config->storage.control_reassembly.received == NULL ||
-      config->storage.control_reassembly_slots == 0 ||
+      config->storage.control_reassembly_slots == 0u ||
       config->storage.control_reassembly_slots > GATEWAY_MAX_CONTROL_SLOTS ||
-      config->storage.maximum_control_message_size < 64 ||
-      config->discovery_timeout_ms < 10 || config->discovery_timeout_ms > 60000 ||
-      config->assignment_timeout_ms < 10 || config->assignment_timeout_ms > 60000)
+      config->storage.maximum_control_message_size < 64u ||
+      config->discovery_timeout_ms < 10u || config->discovery_timeout_ms > 60000u ||
+      config->assignment_timeout_ms < 10u || config->assignment_timeout_ms > 60000u) {
     return CORELIB_INVALID_ARGUMENT;
-  if (config->candidate_retention_timeout_ms < 10 ||
-      config->candidate_retention_timeout_ms > 60000)
+  }
+  if (config->candidate_retention_timeout_ms < 10u ||
+      config->candidate_retention_timeout_ms > 60000u) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   g = memory;
-  memset(g, 0, sizeof(*g));
+  (void)memset(g, 0, sizeof(*g));
   g->config = *config;
   g->application_config = config->device;
   local = config->device;
@@ -1324,10 +1472,11 @@ corelib_status_t corelib_gateway_init(void *memory, size_t memory_size, const co
   local.callbacks.user = g;
   /* The endpoint initializer normally rejects the gateway bit; it is internal here. */
   local.capabilities &= ~CORELIB_CAPABILITY_GATEWAY;
-  if (corelib_init(config->storage.device_context_memory,
-                   config->storage.device_context_memory_size,
-                   &local, &g->device) != CORELIB_OK)
+  if (corelib_init(g->config.storage.device_context_memory,
+                   g->config.storage.device_context_memory_size,
+                   &local, &g->device) != CORELIB_OK) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   g->device->config.capabilities |= CORELIB_CAPABILITY_GATEWAY;
   g->signature = GATEWAY_SIGNATURE;
   g->upstream_peer_address = CORELIB_ROOT_ADDRESS;
@@ -1339,32 +1488,38 @@ corelib_status_t corelib_gateway_init(void *memory, size_t memory_size, const co
 corelib_status_t corelib_gateway_add_link(corelib_gateway_context_t *g, const corelib_link_config_t *value) {
   size_t i;
   gateway_link_t *slot = NULL;
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
+  }
   if (g == NULL || g->signature != GATEWAY_SIGNATURE || value == NULL ||
-      value->link_id == 0 || (value->role != CORELIB_LINK_UPSTREAM && value->role != CORELIB_LINK_DOWNSTREAM) ||
-      (value->role == CORELIB_LINK_UPSTREAM && value->profile_id != 0) ||
-      (value->role == CORELIB_LINK_DOWNSTREAM && value->profile_id == 0))
+      value->link_id == 0u || (value->role != CORELIB_LINK_UPSTREAM && value->role != CORELIB_LINK_DOWNSTREAM) ||
+      (value->role == CORELIB_LINK_UPSTREAM && value->profile_id != 0u) ||
+      (value->role == CORELIB_LINK_DOWNSTREAM && value->profile_id == 0u)) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   if (find_link(g, value->link_id) != NULL ||
-      (value->role == CORELIB_LINK_UPSTREAM && upstream(g) != NULL))
+      (value->role == CORELIB_LINK_UPSTREAM && upstream(g) != NULL)) {
     return CORELIB_INVALID_STATE;
-  for (i = 0; i < g->config.storage.links.capacity; ++i)
+  }
+  for (i = 0; i < g->config.storage.links.capacity; ++i) {
     if (!link_at(g, i)->used) {
       slot = link_at(g, i);
       break;
     }
-  if (slot == NULL)
+  }
+  if (slot == NULL) {
     return CORELIB_CAPACITY_EXCEEDED;
-  memset(slot, 0, sizeof(*slot));
+  }
+  (void)memset(slot, 0, sizeof(*slot));
   slot->used = true;
   slot->available = value->available;
   slot->id = value->link_id;
   slot->profile = value->profile_id;
   slot->role = value->role;
   slot->transport = value->transport_context;
-  if (slot->role == CORELIB_LINK_UPSTREAM)
+  if (slot->role == CORELIB_LINK_UPSTREAM) {
     return corelib_add_link(g->device, slot->id, g);
+  }
   return CORELIB_OK;
 }
 
@@ -1383,11 +1538,13 @@ static void remove_routes_for_link(corelib_gateway_context_t *g, corelib_link_id
         gateway_route_t *route = route_at(g, i);
         if (route->used && route->next_link == link &&
             route->depth == (uint8_t)depth &&
-            (selected == NULL || route->address < selected->address))
+            (selected == NULL || route->address < selected->address)) {
           selected = route;
+        }
       }
-      if (selected == NULL)
+      if (selected == NULL) {
         break;
+      }
       topology(g, selected, false);
       emit_removed(g, selected, CORELIB_CONTROL_NO_ROUTE);
       selected->used = false;
@@ -1402,38 +1559,53 @@ static void remove_routes_for_link(corelib_gateway_context_t *g, corelib_link_id
  */
 static void clear_link_work(corelib_gateway_context_t *g, corelib_link_id_t link) {
   size_t i;
-  for (i = 0; i < g->config.storage.discoveries.capacity; ++i)
-    if (discovery_at(g, i)->used && discovery_at(g, i)->link == link)
+  for (i = 0; i < g->config.storage.discoveries.capacity; ++i) {
+    if (discovery_at(g, i)->used && discovery_at(g, i)->link == link) {
       discovery_at(g, i)->used = false;
-  for (i = 0; i < g->config.storage.candidates.capacity; ++i)
-    if (candidate_at(g, i)->used && candidate_at(g, i)->link == link)
+    }
+  }
+  for (i = 0; i < g->config.storage.candidates.capacity; ++i) {
+    if (candidate_at(g, i)->used && candidate_at(g, i)->link == link) {
       candidate_at(g, i)->used = false;
-  for (i = 0; i < g->config.storage.assignments.capacity; ++i)
-    if (assignment_at(g, i)->used && assignment_at(g, i)->value.link_id == link)
+    }
+  }
+  for (i = 0; i < g->config.storage.assignments.capacity; ++i) {
+    if (assignment_at(g, i)->used && assignment_at(g, i)->value.link_id == link) {
       assignment_at(g, i)->used = false;
-  for (i = 0; i < g->config.storage.forwarding.capacity; ++i)
-    if (forward_at(g, i)->used && forward_at(g, i)->link == link)
+    }
+  }
+  for (i = 0; i < g->config.storage.forwarding.capacity; ++i) {
+    if (forward_at(g, i)->used && forward_at(g, i)->link == link) {
       forward_at(g, i)->used = false;
+    }
+  }
 }
 
 corelib_status_t corelib_gateway_set_link_available(corelib_gateway_context_t *g, corelib_link_id_t id, bool available) {
   gateway_link_t *link;
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   link = find_link(g, id);
-  if (link == NULL)
+  if (link == NULL) {
     return CORELIB_NOT_FOUND;
-  if (link->available == available)
+  }
+  if (link->available == available) {
     return CORELIB_OK;
+  }
   link->available = available;
   if (!available && link->role == CORELIB_LINK_UPSTREAM) {
-    corelib_reset(g->device);
+    (void)corelib_reset(g->device);
     clear_gateway(g, true);
   } else if (!available) {
     clear_link_work(g, id);
     remove_routes_for_link(g, id);
+    (void)flush(g);
+  } else {
+    /* Making a downstream link available does not alter its routing state. */
   }
   return CORELIB_OK;
 }
@@ -1441,82 +1613,97 @@ corelib_status_t corelib_gateway_set_link_available(corelib_gateway_context_t *g
 corelib_status_t corelib_gateway_remove_link(corelib_gateway_context_t *g, corelib_link_id_t id) {
   gateway_link_t *link;
   corelib_status_t status;
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   link = find_link(g, id);
-  if (link == NULL)
+  if (link == NULL) {
     return CORELIB_NOT_FOUND;
+  }
   status = corelib_gateway_set_link_available(g, id, false);
-  if (link->role == CORELIB_LINK_UPSTREAM)
+  if (link->role == CORELIB_LINK_UPSTREAM) {
     (void)corelib_remove_link(g->device, id);
-  memset(link, 0, sizeof(*link));
+  }
+  (void)memset(link, 0, sizeof(*link));
   return status;
 }
 
 corelib_status_t corelib_gateway_receive_frame(corelib_gateway_context_t *g, corelib_link_id_t ingress, const uint8_t bytes[64], uint64_t now) {
   corelib_pfp_frame_t frame;
-  gateway_link_t *link;
+  const gateway_link_t *link;
   uint16_t local;
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || bytes == NULL || now < g->now)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE || bytes == NULL || now < g->now) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   link = find_link(g, ingress);
-  if (link == NULL || !link->available)
+  if (link == NULL || !link->available) {
     return CORELIB_NOT_FOUND;
+  }
   g->now = now;
-  if (corelib_pfp_decode(bytes, &frame) != CORELIB_OK)
+  if (corelib_pfp_decode(bytes, &frame) != CORELIB_OK) {
     return CORELIB_INVALID_FRAME;
+  }
   local = g->device->local_address;
   if (frame.type == CORELIB_PFP_PROBE_REQUEST) {
-    if (link->role != CORELIB_LINK_UPSTREAM)
+    if (link->role != CORELIB_LINK_UPSTREAM) {
       return CORELIB_INVALID_FRAME;
+    }
     return corelib_receive_frame(g->device, ingress, bytes, now);
   }
   if (g->device->session_state != CORELIB_SESSION_INACTIVE &&
-      frame.session_id != g->device->session_id)
+      frame.session_id != g->device->session_id) {
     return CORELIB_INVALID_STATE;
+  }
   if (link->role == CORELIB_LINK_DOWNSTREAM) {
-    gateway_route_t *source = find_route_address(g, frame.source);
+    const gateway_route_t *source = find_route_address(g, frame.source);
     if (source == NULL || source->state != CORELIB_ROUTE_READY ||
-        source->next_link != ingress)
+        source->next_link != ingress) {
       return CORELIB_INVALID_FRAME;
+    }
   }
   if (frame.destination == local ||
-      (link->role == CORELIB_LINK_UPSTREAM && local == 0 &&
-       (frame.destination == 0 || frame.destination == CORELIB_DIRECT_NODE_ADDRESS))) {
-    if (frame.type == CORELIB_PFP_CONTROL)
+      (link->role == CORELIB_LINK_UPSTREAM && local == 0u &&
+       frame.destination == CORELIB_DIRECT_NODE_ADDRESS)) {
+    if (frame.type == CORELIB_PFP_CONTROL) {
       return accept_control_fragment(g, ingress, &frame);
+    }
     return corelib_receive_frame(g->device, ingress, bytes, now);
   }
   if (g->device->session_state == CORELIB_SESSION_INACTIVE ||
-      frame.destination == 0 ||
-      frame.destination == 0xffffu)
+      frame.destination == 0u ||
+      frame.destination == 0xffffu) {
     return CORELIB_INVALID_STATE;
+  }
   {
-    gateway_link_t *egress = NULL;
-    if (frame.destination == CORELIB_ROOT_ADDRESS)
+    const gateway_link_t *egress = NULL;
+    if (frame.destination == CORELIB_ROOT_ADDRESS) {
       egress = upstream(g);
-    else {
-      gateway_route_t *route = find_route_address(g, frame.destination);
-      if (route != NULL && route->state == CORELIB_ROUTE_READY)
+    } else {
+      const gateway_route_t *route = find_route_address(g, frame.destination);
+      if (route != NULL && route->state == CORELIB_ROUTE_READY) {
         egress = find_link(g, route->next_link);
+      }
     }
     if (egress == NULL || !egress->available || egress->id == ingress) {
       send_route_error(g, &frame, 5);
       return CORELIB_NOT_FOUND;
     }
-    if (frame.hop_limit <= 1) {
+    if (frame.hop_limit <= 1u) {
       send_route_error(g, &frame, 6);
       return CORELIB_EXPIRED;
     }
     {
       uint8_t forwarded[64];
       frame.hop_limit--;
-      if (corelib_pfp_encode(&frame, forwarded) != CORELIB_OK)
+      if (corelib_pfp_encode(&frame, forwarded) != CORELIB_OK) {
         return CORELIB_INVALID_FRAME;
+      }
       return queue_bytes(g, egress->id, forwarded, ingress);
     }
   }
@@ -1524,10 +1711,12 @@ corelib_status_t corelib_gateway_receive_frame(corelib_gateway_context_t *g, cor
 
 corelib_status_t corelib_gateway_accept_bootstrap_assignment(corelib_gateway_context_t *g, const corelib_bootstrap_assignment_t *assignment, uint64_t monotonic_ms) {
   corelib_status_t status;
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || assignment == NULL)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE || assignment == NULL) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   status = corelib_accept_bootstrap_assignment(g->device, assignment,
                                                monotonic_ms);
   if (status == CORELIB_OK) {
@@ -1538,40 +1727,46 @@ corelib_status_t corelib_gateway_accept_bootstrap_assignment(corelib_gateway_con
 }
 
 corelib_status_t corelib_gateway_report_candidate(corelib_gateway_context_t *g, const corelib_candidate_t *value) {
-  gateway_discovery_t *round = NULL;
+  const gateway_discovery_t *round = NULL;
   gateway_candidate_t *slot = NULL;
-  gateway_link_t *up;
+  const gateway_link_t *up;
   size_t i;
   uint8_t message[80];
   size_t n;
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || value == NULL)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE || value == NULL) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   for (i = 0; i < g->config.storage.discoveries.capacity; ++i) {
-    gateway_discovery_t *r = discovery_at(g, i);
+    const gateway_discovery_t *r = discovery_at(g, i);
     if (r->used && r->link == value->link_id && memcmp(r->token, value->discovery_token, 16) == 0) {
       round = r;
       break;
     }
   }
-  if (round == NULL)
+  if (round == NULL) {
     return CORELIB_NOT_FOUND;
+  }
   for (i = 0; i < g->config.storage.candidates.capacity; ++i) {
     gateway_candidate_t *c = candidate_at(g, i);
-    if (c->used && memcmp(c->uuid, value->node_uuid, 16) == 0)
+    if (c->used && memcmp(c->uuid, value->node_uuid, 16) == 0) {
       return CORELIB_INVALID_STATE;
-    if (!c->used && slot == NULL)
+    }
+    if (!c->used && slot == NULL) {
       slot = c;
+    }
   }
-  if (slot == NULL)
+  if (slot == NULL) {
     return CORELIB_CAPACITY_EXCEEDED;
-  memset(slot, 0, sizeof(*slot));
+  }
+  (void)memset(slot, 0, sizeof(*slot));
   slot->used = true;
   slot->link = value->link_id;
   slot->capabilities = value->capabilities;
-  memcpy(slot->uuid, value->node_uuid, 16);
-  memcpy(slot->token, value->discovery_token, 16);
+  (void)memcpy(slot->uuid, value->node_uuid, 16);
+  (void)memcpy(slot->token, value->discovery_token, 16);
   slot->deadline = g->now + g->config.candidate_retention_timeout_ms;
   n = ctl_header(message, CONTROL_NODE_FOUND, 0);
   n = tlv(message, n, TLV_NODE_UUID, true, slot->uuid, 16);
@@ -1587,10 +1782,12 @@ corelib_status_t corelib_gateway_report_candidate(corelib_gateway_context_t *g, 
 
 corelib_status_t corelib_gateway_complete_discovery(corelib_gateway_context_t *g, corelib_link_id_t link, const uint8_t token[16], corelib_status_t result) {
   size_t i;
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || token == NULL)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE || token == NULL) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   for (i = 0; i < g->config.storage.discoveries.capacity; ++i) {
     gateway_discovery_t *r = discovery_at(g, i);
     if (r->used && r->link == link && memcmp(r->token, token, 16) == 0) {
@@ -1604,49 +1801,60 @@ corelib_status_t corelib_gateway_complete_discovery(corelib_gateway_context_t *g
 corelib_status_t corelib_gateway_complete_assignment(corelib_gateway_context_t *g, uint32_t transaction, const uint8_t uuid[16], corelib_control_status_t result) {
   gateway_assignment_t *a = NULL;
   gateway_route_t *route;
-  gateway_link_t *up;
-  uint8_t ack[64], ready[64];
-  size_t n, ready_n, i;
-  if (g != NULL && g->in_call)
+  const gateway_link_t *up;
+  uint8_t ack[64];
+  uint8_t ready[64];
+  size_t n;
+  size_t ready_n;
+  size_t i;
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || transaction == 0 ||
-      uuid == NULL || result > CORELIB_CONTROL_RESOURCE_LIMIT)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE || transaction == 0u ||
+      uuid == NULL || result > CORELIB_CONTROL_RESOURCE_LIMIT) {
     return CORELIB_INVALID_ARGUMENT;
-  for (i = 0; i < g->config.storage.assignments.capacity; ++i)
+  }
+  for (i = 0; i < g->config.storage.assignments.capacity; ++i) {
     if (assignment_at(g, i)->used &&
         assignment_at(g, i)->value.transaction_id == transaction &&
         memcmp(assignment_at(g, i)->value.node_uuid, uuid, 16) == 0) {
       a = assignment_at(g, i);
       break;
     }
-  if (a == NULL)
+  }
+  if (a == NULL) {
     return CORELIB_NOT_FOUND;
+  }
   up = upstream(g);
   n = ctl_header(ack, CONTROL_ADDRESS_ACK, transaction);
   n = tlv(ack, n, TLV_NODE_UUID, true, a->value.node_uuid, 16);
   n = tlv16(ack, n, TLV_NODE_ADDRESS, a->value.node_address);
   n = tlv16(ack, n, TLV_PARENT_ADDRESS, a->value.parent_address);
   n = tlv16(ack, n, TLV_STATUS, (uint16_t)result);
-  if (up == NULL)
+  if (up == NULL) {
     return CORELIB_INVALID_STATE;
+  }
   if (result != CORELIB_CONTROL_SUCCESS) {
     const corelib_status_t status = send_control(
         g, up->id, upstream_peer(g), ack, n);
     if (status == CORELIB_OK) {
-      for (i = 0; i < g->config.storage.candidates.capacity; ++i)
+      for (i = 0; i < g->config.storage.candidates.capacity; ++i) {
         if (candidate_at(g, i)->used &&
-            memcmp(candidate_at(g, i)->uuid, a->value.node_uuid, 16) == 0)
+            memcmp(candidate_at(g, i)->uuid, a->value.node_uuid, 16) == 0) {
           candidate_at(g, i)->used = false;
+        }
+      }
       a->used = false;
     }
     return status;
   }
   route = allocate_route(g);
-  if (route == NULL || free_forward_slots(g) < 3u)
+  if (route == NULL || free_forward_slots(g) < 3u) {
     return CORELIB_CAPACITY_EXCEEDED;
-  memset(route, 0, sizeof(*route));
+  }
+  (void)memset(route, 0, sizeof(*route));
   route->used = true;
-  memcpy(route->uuid, a->value.node_uuid, 16);
+  (void)memcpy(route->uuid, a->value.node_uuid, 16);
   route->capabilities = a->capabilities;
   route->address = a->value.node_address;
   route->parent = a->value.parent_address;
@@ -1660,27 +1868,32 @@ corelib_status_t corelib_gateway_complete_assignment(corelib_gateway_context_t *
   ready_n = tlv32(ready, ready_n, TLV_CAPABILITIES, route->capabilities, true);
   ready_n = tlv16(ready, ready_n, TLV_STATUS, 0);
   {
-    const uint32_t work = g->next_message + 1u == 0u ? 1u : g->next_message + 1u;
+    const uint32_t work = next_nonzero(g->next_message);
     corelib_status_t status = enqueue_control(
         g, up->id, upstream_peer(g), g->device->local_address, ack, n, work);
-    if (status == CORELIB_OK)
+    if (status == CORELIB_OK) {
       status = enqueue_control(g, up->id, upstream_peer(g),
                                g->device->local_address, ready, ready_n, work);
+    }
     if (status != CORELIB_OK) {
       size_t slot;
       route->used = false;
-      for (slot = 0; slot < g->config.storage.forwarding.capacity; ++slot)
-        if (forward_at(g, slot)->used && forward_at(g, slot)->work == work)
+      for (slot = 0; slot < g->config.storage.forwarding.capacity; ++slot) {
+        if (forward_at(g, slot)->used && forward_at(g, slot)->work == work) {
           forward_at(g, slot)->used = false;
+        }
+      }
       return status;
     }
   }
   route->state = CORELIB_ROUTE_READY;
   topology(g, route, true);
-  for (i = 0; i < g->config.storage.candidates.capacity; ++i)
+  for (i = 0; i < g->config.storage.candidates.capacity; ++i) {
     if (candidate_at(g, i)->used &&
-        memcmp(candidate_at(g, i)->uuid, a->value.node_uuid, 16) == 0)
+        memcmp(candidate_at(g, i)->uuid, a->value.node_uuid, 16) == 0) {
       candidate_at(g, i)->used = false;
+    }
+  }
   a->used = false;
   {
     const corelib_status_t status = flush(g);
@@ -1689,14 +1902,17 @@ corelib_status_t corelib_gateway_complete_assignment(corelib_gateway_context_t *
 }
 
 corelib_status_t corelib_gateway_report_node_lost(corelib_gateway_context_t *g, const uint8_t uuid[16]) {
-  gateway_route_t *route;
-  if (g != NULL && g->in_call)
+  const gateway_route_t *route;
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || uuid == NULL)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE || uuid == NULL) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   route = find_route_uuid(g, uuid);
-  if (route == NULL)
+  if (route == NULL) {
     return CORELIB_NOT_FOUND;
+  }
   {
     const uint16_t lost = route->address;
     int depth;
@@ -1708,22 +1924,27 @@ corelib_status_t corelib_gateway_report_node_lost(corelib_gateway_context_t *g, 
           gateway_route_t *candidate = route_at(g, i);
           uint16_t parent;
           bool affected = candidate->used && candidate->address == lost;
-          if (!candidate->used || candidate->depth != (uint8_t)depth)
+          if (!candidate->used || candidate->depth != (uint8_t)depth) {
             continue;
+          }
           parent = candidate->parent;
-          while (!affected && parent != g->device->local_address && parent != 0) {
-            gateway_route_t *ancestor = find_route_address(g, parent);
-            if (parent == lost)
+          while (!affected && parent != g->device->local_address && parent != 0u) {
+            const gateway_route_t *ancestor = find_route_address(g, parent);
+            if (parent == lost) {
               affected = true;
-            if (ancestor == NULL)
+            }
+            if (ancestor == NULL) {
               break;
+            }
             parent = ancestor->parent;
           }
-          if (affected && (selected == NULL || candidate->address < selected->address))
+          if (affected && (selected == NULL || candidate->address < selected->address)) {
             selected = candidate;
+          }
         }
-        if (selected == NULL)
+        if (selected == NULL) {
           break;
+        }
         topology(g, selected, false);
         emit_removed(g, selected, CORELIB_CONTROL_NO_ROUTE);
         selected->used = false;
@@ -1734,32 +1955,40 @@ corelib_status_t corelib_gateway_report_node_lost(corelib_gateway_context_t *g, 
 }
 
 corelib_status_t corelib_gateway_respond(corelib_gateway_context_t *g, const corelib_transaction_id_t *request, corelib_transaction_result_t result, const uint8_t *data, size_t data_size) {
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   return corelib_respond(g->device, request, result, data, data_size);
 }
 
 corelib_status_t corelib_gateway_publish(corelib_gateway_context_t *g, bool common, uint32_t share_id, const uint8_t *data, size_t data_size) {
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   return corelib_publish(g->device, common, share_id, data, data_size);
 }
 
 corelib_status_t corelib_gateway_tick(corelib_gateway_context_t *g, uint64_t now) {
   size_t i;
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || now < g->now)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE || now < g->now) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   g->now = now;
-  for (i = 0; i < g->config.storage.control_reassembly_slots; ++i)
-    if (g->assemblies[i].used && now - g->assemblies[i].started >= 1000)
+  for (i = 0; i < g->config.storage.control_reassembly_slots; ++i) {
+    if (g->assemblies[i].used && now - g->assemblies[i].started >= 1000u) {
       g->assemblies[i].used = false;
-  for (i = 0; i < g->config.storage.discoveries.capacity; ++i)
+    }
+  }
+  for (i = 0; i < g->config.storage.discoveries.capacity; ++i) {
     if (discovery_at(g, i)->used && now >= discovery_at(g, i)->deadline) {
       discovery_at(g, i)->used = false;
       gateway_diag(g, CORELIB_DIAGNOSTIC_REQUEST_EXPIRED, CORELIB_EXPIRED);
@@ -1767,9 +1996,9 @@ corelib_status_t corelib_gateway_tick(corelib_gateway_context_t *g, uint64_t now
                g->config.callbacks.discover != NULL) {
       gateway_discovery_t *round = discovery_at(g, i);
       gateway_link_t *link = find_link(g, round->link);
-      if (link == NULL || !link->available)
+      if (link == NULL || !link->available) {
         round->used = false;
-      else {
+      } else {
         const bool entered = g->in_call;
         corelib_send_result_t callback_result;
         g->in_call = true;
@@ -1777,21 +2006,29 @@ corelib_status_t corelib_gateway_tick(corelib_gateway_context_t *g, uint64_t now
             g->application_config.callbacks.user, link->id, link->transport,
             link->profile, round->token);
         g->in_call = entered;
-        if (callback_result == CORELIB_SEND_ACCEPTED)
+        if (callback_result == CORELIB_SEND_ACCEPTED) {
           round->callback_pending = false;
-        else if (callback_result == CORELIB_SEND_FAILED)
+        } else if (callback_result == CORELIB_SEND_FAILED) {
           round->used = false;
+        } else {
+          /* Leave a busy callback pending for a later tick. */
+        }
       }
+    } else {
+      /* No discovery state transition is due on this tick. */
     }
-  for (i = 0; i < g->config.storage.candidates.capacity; ++i)
-    if (candidate_at(g, i)->used && now >= candidate_at(g, i)->deadline)
+  }
+  for (i = 0; i < g->config.storage.candidates.capacity; ++i) {
+    if (candidate_at(g, i)->used && now >= candidate_at(g, i)->deadline) {
       candidate_at(g, i)->used = false;
-  for (i = 0; i < g->config.storage.assignments.capacity; ++i)
+    }
+  }
+  for (i = 0; i < g->config.storage.assignments.capacity; ++i) {
     if (assignment_at(g, i)->used && now >= assignment_at(g, i)->deadline) {
       gateway_assignment_t *pending = assignment_at(g, i);
       const uint32_t transaction = pending->value.transaction_id;
       uint8_t uuid[16];
-      memcpy(uuid, pending->value.node_uuid, 16);
+      (void)memcpy(uuid, pending->value.node_uuid, 16);
       (void)corelib_gateway_complete_assignment(
           g, transaction, uuid, CORELIB_CONTROL_SESSION_REJECTED);
       gateway_diag(g, CORELIB_DIAGNOSTIC_REQUEST_EXPIRED, CORELIB_EXPIRED);
@@ -1799,25 +2036,32 @@ corelib_status_t corelib_gateway_tick(corelib_gateway_context_t *g, uint64_t now
                g->config.callbacks.bootstrap_assign != NULL) {
       gateway_assignment_t *pending = assignment_at(g, i);
       gateway_link_t *link = find_link(g, pending->value.link_id);
-      if (link == NULL || !link->available)
+      if (link == NULL || !link->available) {
         pending->used = false;
-      else {
+      } else {
         const bool entered = g->in_call;
         corelib_send_result_t callback_result;
         g->in_call = true;
         callback_result = g->config.callbacks.bootstrap_assign(
             g->application_config.callbacks.user, link->transport, &pending->value);
         g->in_call = entered;
-        if (callback_result == CORELIB_SEND_ACCEPTED)
+        if (callback_result == CORELIB_SEND_ACCEPTED) {
           pending->callback_pending = false;
-        else if (callback_result == CORELIB_SEND_FAILED)
+        } else if (callback_result == CORELIB_SEND_FAILED) {
           pending->used = false;
+        } else {
+          /* Leave a busy callback pending for a later tick. */
+        }
       }
+    } else {
+      /* No assignment state transition is due on this tick. */
     }
+  }
   {
     corelib_status_t status = corelib_tick(g->device, now);
-    if (status != CORELIB_OK && status != CORELIB_BUSY)
+    if (status != CORELIB_OK && status != CORELIB_BUSY) {
       return status;
+    }
   }
   {
     corelib_status_t status = flush(g);
@@ -1826,48 +2070,71 @@ corelib_status_t corelib_gateway_tick(corelib_gateway_context_t *g, uint64_t now
 }
 
 corelib_status_t corelib_gateway_reset(corelib_gateway_context_t *g) {
-  if (g != NULL && g->in_call)
+  if (g != NULL && g->in_call) {
     return CORELIB_REENTRANT;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE)
+  }
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   (void)corelib_reset(g->device);
   clear_gateway(g, true);
   return CORELIB_OK;
 }
 
 corelib_status_t corelib_gateway_usage(const corelib_gateway_context_t *cg, corelib_gateway_usage_t *usage) {
-  corelib_gateway_context_t *g = (corelib_gateway_context_t *)cg;
   size_t i;
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || usage == NULL)
+  if (cg == NULL || cg->signature != GATEWAY_SIGNATURE || usage == NULL) {
     return CORELIB_INVALID_ARGUMENT;
-  memset(usage, 0, sizeof(*usage));
-  for (i = 0; i < g->config.storage.links.capacity; ++i)
-    if (link_at(g, i)->used)
+  }
+  (void)memset(usage, 0, sizeof(*usage));
+  for (i = 0; i < cg->config.storage.links.capacity; ++i) {
+    const gateway_link_t *link = (const gateway_link_t *)entry_at_const(&cg->config.storage.links, i);
+    if (link->used) {
       usage->links++;
-  for (i = 0; i < g->config.storage.routes.capacity; ++i)
-    if (route_at(g, i)->used)
+    }
+  }
+  for (i = 0; i < cg->config.storage.routes.capacity; ++i) {
+    const gateway_route_t *route = (const gateway_route_t *)entry_at_const(&cg->config.storage.routes, i);
+    if (route->used) {
       usage->routes++;
-  for (i = 0; i < g->config.storage.discoveries.capacity; ++i)
-    if (discovery_at(g, i)->used)
+    }
+  }
+  for (i = 0; i < cg->config.storage.discoveries.capacity; ++i) {
+    const gateway_discovery_t *discovery = (const gateway_discovery_t *)entry_at_const(&cg->config.storage.discoveries, i);
+    if (discovery->used) {
       usage->discoveries++;
-  for (i = 0; i < g->config.storage.candidates.capacity; ++i)
-    if (candidate_at(g, i)->used)
+    }
+  }
+  for (i = 0; i < cg->config.storage.candidates.capacity; ++i) {
+    const gateway_candidate_t *candidate = (const gateway_candidate_t *)entry_at_const(&cg->config.storage.candidates, i);
+    if (candidate->used) {
       usage->candidates++;
-  for (i = 0; i < g->config.storage.assignments.capacity; ++i)
-    if (assignment_at(g, i)->used)
+    }
+  }
+  for (i = 0; i < cg->config.storage.assignments.capacity; ++i) {
+    const gateway_assignment_t *assignment = (const gateway_assignment_t *)entry_at_const(&cg->config.storage.assignments, i);
+    if (assignment->used) {
       usage->assignments++;
-  for (i = 0; i < g->config.storage.forwarding.capacity; ++i)
-    if (forward_at(g, i)->used)
+    }
+  }
+  for (i = 0; i < cg->config.storage.forwarding.capacity; ++i) {
+    const gateway_forward_t *forward = (const gateway_forward_t *)entry_at_const(&cg->config.storage.forwarding, i);
+    if (forward->used) {
       usage->queued_frames++;
-  for (i = 0; i < g->config.storage.control_reassembly_slots; ++i)
-    if (g->assemblies[i].used)
+    }
+  }
+  for (i = 0; i < cg->config.storage.control_reassembly_slots; ++i) {
+    if (cg->assemblies[i].used) {
       usage->active_control_reassemblies++;
+    }
+  }
   return CORELIB_OK;
 }
 
 corelib_status_t corelib_gateway_limits(const corelib_gateway_context_t *g, corelib_gateway_limits_t *limits) {
-  if (g == NULL || g->signature != GATEWAY_SIGNATURE || limits == NULL)
+  if (g == NULL || g->signature != GATEWAY_SIGNATURE || limits == NULL) {
     return CORELIB_INVALID_ARGUMENT;
+  }
   limits->links = g->config.storage.links.capacity;
   limits->routes = g->config.storage.routes.capacity;
   limits->discoveries = g->config.storage.discoveries.capacity;
