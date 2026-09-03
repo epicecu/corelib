@@ -76,6 +76,14 @@ def public_members(root: ET.Element, kinds: set[str]) -> list[ApiEntry]:
     ]
 
 
+def public_members_by_kind(root: ET.Element, kinds: tuple[str, ...]) -> list[ApiEntry]:
+    """Return public members in an explicit kind order."""
+    entries: list[ApiEntry] = []
+    for kind in kinds:
+        entries.extend(public_members(root, {kind}))
+    return entries
+
+
 def read_xml(path: Path) -> ET.Element:
     """Read one required Doxygen XML document."""
     try:
@@ -152,7 +160,9 @@ def render_class(title: str, root: ET.Element, heading_level: int = 1) -> str:
 
 def render_cpp_types(xml_root: Path, namespace: ET.Element) -> str:
     """Render public C++ aliases, enums, and value structures."""
-    entries = public_members(namespace, {"typedef", "enum"})
+    # Doxygen versions disagree about whether enum or typedef sections appear
+    # first in namespace XML. Keep the public page stable across build hosts.
+    entries = public_members_by_kind(namespace, ("enum", "typedef"))
     for refid in (
         "structcorelib_1_1TransactionId",
         "structcorelib_1_1TransactionView",

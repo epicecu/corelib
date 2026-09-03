@@ -13,6 +13,7 @@ from docs_api import (  # noqa: E402
     clean_space,
     member_entry,
     public_members,
+    public_members_by_kind,
     write_pages,
 )
 
@@ -59,6 +60,28 @@ class DocumentationApiTest(unittest.TestCase):
         entry = member_entry(node)
         self.assertEqual(entry.signature, "typedef enum { ... } corelib_status_t")
         self.assertIn("`CORELIB_OK`, `CORELIB_BUSY`", entry.docs)
+
+    def test_orders_members_independently_of_xml_sections(self) -> None:
+        root = ET.fromstring(
+            """
+            <doxygen>
+              <sectiondef kind="typedef">
+                <memberdef kind="typedef" prot="public">
+                  <definition>using corelib::LinkId = corelib_link_id_t</definition>
+                  <name>LinkId</name>
+                </memberdef>
+              </sectiondef>
+              <sectiondef kind="enum">
+                <memberdef kind="enum" prot="public" strong="yes">
+                  <name>Status</name>
+                  <qualifiedname>corelib::Status</qualifiedname>
+                </memberdef>
+              </sectiondef>
+            </doxygen>
+            """
+        )
+        entries = public_members_by_kind(root, ("enum", "typedef"))
+        self.assertEqual([entry.name for entry in entries], ["Status", "LinkId"])
 
     def test_writes_and_checks_deterministic_pages(self) -> None:
         pages = {"c/index.md": "generated\n", "cpp/index.md": "generated\n"}
