@@ -9,5 +9,8 @@ int main(void) {
       corelib_pending_request_entry_size() == 0u) {
     return 1;
   }
-  return version.pfp_version == 1u && version.transaction_version == 2u ? 0 : 2;
+  return version.major == 1u && version.minor == 0u && version.patch == 0u &&
+                 version.pfp_version == 1u && version.transaction_version == 2u
+             ? 0
+             : 2;
 }

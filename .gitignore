@@ -9,3 +9,5 @@ __pycache__/
 *.pyc
 .pio/
 /programmor-documentation-repo
+node_modules/
+docs/.vitepress/cache/

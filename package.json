@@ -1,0 +1,17 @@
+{
+  "name": "@epicecu/corelib-docs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "docs:build": "vitepress build docs",
+    "docs:dev": "vitepress dev docs",
+    "docs:preview": "vitepress preview docs --outDir build/docs/site"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

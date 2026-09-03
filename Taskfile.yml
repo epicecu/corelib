@@ -73,6 +73,8 @@ tasks:
     cmds:
       - task: quality:format-check
       - task: quality:docs
+      - task: docs:versions:check
+      - task: docs:build
       - task: native:check
       - task: native:test
       - task: native:conformance

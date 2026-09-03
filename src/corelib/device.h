@@ -1,6 +1,6 @@
 /**
  * @file device.h
- * @brief Heap-free C11 device endpoint API for Programmor Frame Protocol.
+ * @brief Heap-free C11 device endpoint API for Portable Frame Protocol.
  */
 #ifndef CORELIB_DEVICE_H
 #define CORELIB_DEVICE_H
@@ -14,9 +14,9 @@ extern "C" {
 #endif
 
 /** @brief Corelib semantic major version. */
-#define CORELIB_VERSION_MAJOR 0u
+#define CORELIB_VERSION_MAJOR 1u
 /** @brief Corelib semantic minor version. */
-#define CORELIB_VERSION_MINOR 1u
+#define CORELIB_VERSION_MINOR 0u
 /** @brief Corelib semantic patch version. */
 #define CORELIB_VERSION_PATCH 0u
 /** @brief Supported PFP version. */

@@ -43,14 +43,78 @@ tasks:
       - cmake -DNM=nm -DLIBRARY={{.ROOT_DIR}}/build/no-gateway/libcorelib_device.a -P cmake/check_no_gateway.cmake
 
   quality:docs:
-    desc: Build public API documentation and lint all owned symbol comments
+    desc: Lint owned comments and verify generated public API reference pages
     cmds:
       - cmake -E make_directory build/docs/api build/docs/lint
       - '{{.DOXYGEN}} docs/Doxyfile'
       - '{{.DOXYGEN}} docs/Doxyfile.lint'
+      - '{{.PYTHON}} tools/docs_api.py --check'
+      - '{{.PYTHON}} tools/check_terminology.py'
     preconditions:
       - sh: command -v {{.DOXYGEN}}
         msg: Doxygen must be installed to build API documentation
+
+  docs:setup:
+    desc: Install the locked VitePress toolchain
+    cmds:
+      - npm ci
+    status:
+      - npm list --depth=0 vitepress@1.6.4
+
+  docs:api:
+    desc: Regenerate committed VitePress API reference pages
+    cmds:
+      - cmake -E make_directory build/docs/api
+      - '{{.DOXYGEN}} docs/Doxyfile'
+      - '{{.PYTHON}} tools/docs_api.py'
+    preconditions:
+      - sh: command -v {{.DOXYGEN}}
+        msg: Doxygen must be installed to generate API documentation
+
+  docs:api-check:
+    desc: Verify API reference pages match public source comments
+    cmds:
+      - task: quality:docs
+
+  docs:build:
+    desc: Build the VitePress documentation site
+    cmds:
+      - task: docs:setup
+      - task: quality:docs
+      - npm run docs:build -- --base {{.DOCS_BASE}}
+    vars:
+      DOCS_BASE: '{{default "/" .DOCS_BASE}}'
+      DOCS_OUT_DIR: '{{default "build/docs/site" .DOCS_OUT_DIR}}'
+    env:
+      CORELIB_DOCS_OUT_DIR: '{{.DOCS_OUT_DIR}}'
+
+  docs:versions:check:
+    desc: Test documentation version discovery and report deployable tags
+    cmds:
+      - '{{.PYTHON}} -m unittest discover -s tools/tests -p ''test_docs_*.py'''
+      - '{{.PYTHON}} tools/docs_versions.py list'
+
+  docs:versions:build:
+    desc: Assemble Latest and retained release documentation for GitHub Pages
+    cmds:
+      - >-
+        {{.PYTHON}} tools/docs_versions.py build
+        --output {{.DOCS_OUT_DIR}}
+        --site-origin {{.DOCS_SITE_ORIGIN}}
+        --project-base {{.DOCS_PROJECT_BASE}}
+    vars:
+      DOCS_OUT_DIR: '{{default "build/docs/site" .DOCS_OUT_DIR}}'
+      DOCS_SITE_ORIGIN: '{{default "https://epicecu.github.io" .DOCS_SITE_ORIGIN}}'
+      DOCS_PROJECT_BASE: '{{default "/corelib/" .DOCS_PROJECT_BASE}}'
+
+  docs:serve:
+    desc: Validate and serve the VitePress documentation site locally
+    cmds:
+      - task: docs:setup
+      - task: quality:docs
+      - npm run docs:dev -- --host 127.0.0.1 --port {{.DOCS_PORT}}
+    vars:
+      DOCS_PORT: '{{default "8000" .DOCS_PORT}}'
 
   quality:fuzz:
     desc: Build fuzz targets with Clang

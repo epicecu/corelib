@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0
+## 1.0.0
 
 - Renamed the library, C and C++ APIs, CMake package and targets, Arduino
   metadata, examples, and validation tooling to Corelib. Programmor naming is
@@ -18,7 +18,8 @@
   bounded discovery and bootstrap integration, atomic route publication,
   nested routing, topology loss handling, and C++14 facade parity.
 - Added the heap-free C11 standard-node runtime.
-- Added PFP v1 framing, validation, sessions, fragmentation, and reassembly.
+- Added Portable Frame Protocol (PFP) v1 framing, validation, sessions,
+  fragmentation, and reassembly.
 - Added Transaction Protocol v2 request, response, result, and publication APIs.
 - Added the C++14 ETL-based facade, typed callback interface, full C API
   operation parity, CMake package component, Arduino metadata, examples,
