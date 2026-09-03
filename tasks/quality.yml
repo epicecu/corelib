@@ -54,6 +54,28 @@ tasks:
       - sh: command -v {{.DOXYGEN}}
         msg: Doxygen must be installed to build API documentation
 
+  quality:misra:
+    desc: Run blocking MISRA C:2012 analysis on the owned C implementation
+    cmds:
+      - for:
+          var: MISRA_PLATFORMS
+        cmd: >-
+          {{.CPPCHECK}}
+          src/corelib/device.c src/corelib/gateway.c
+          src/protocol/pfp.c src/protocol/transaction.c
+          --std=c11 --language=c --platform={{.ITEM}} -Isrc
+          '-DUINT32_C(value)=value##U'
+          --addon=config/cppcheck/misra.json
+          --suppressions-list=config/cppcheck/misra-suppressions.txt
+          --enable=warning,style,performance,portability
+          --suppress=missingIncludeSystem --error-exitcode=1
+          --template='{file}:{line}:{column}: {severity}: {message} [{id}]'
+    vars:
+      MISRA_PLATFORMS: unix32 unix64
+    preconditions:
+      - sh: '{{.CPPCHECK}} --version'
+        msg: Cppcheck with its MISRA addon must be installed
+
   docs:setup:
     desc: Install the locked VitePress toolchain
     cmds:

@@ -138,6 +138,13 @@ export default defineConfig({
           { text: 'Handler and Device', link: '/reference/cpp/device' },
           { text: 'Gateway', link: '/reference/cpp/gateway' }
         ]
+      },
+      {
+        text: 'Project',
+        items: [
+          { text: 'MISRA analysis', link: '/misra' },
+          { text: 'Source style', link: '/style' }
+        ]
       }
     ],
     editLink: sourceLink,

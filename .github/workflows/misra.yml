@@ -1,0 +1,26 @@
+name: MISRA C Analysis
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: misra-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyse:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y cppcheck=2.13.0-2ubuntu3
+      - run: cppcheck --version | grep -F 'Cppcheck 2.13.0'
+      - run: task quality:misra
