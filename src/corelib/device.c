@@ -58,6 +58,34 @@ static void diagnostic(corelib_context_t *context, corelib_diagnostic_t code, co
 }
 
 /**
+ * @brief Address a byte within caller-owned storage.
+ * @param[in,out] base Start of the validated storage region.
+ * @param[in] offset Bounded byte offset within the region.
+ * @return Address of the selected byte.
+ */
+static uint8_t *device_byte_at(uint8_t *base, size_t offset) {
+  return &base[offset];
+}
+
+/**
+ * @brief Test whether caller-owned storage meets an alignment requirement.
+ * @param[in] memory Storage address to test.
+ * @param[in] alignment Required power-of-two alignment.
+ * @return True when the address is suitably aligned; otherwise false.
+ */
+static bool device_pointer_is_aligned(const void *memory, size_t alignment) {
+  return ((uintptr_t)memory % (uintptr_t)alignment) == (uintptr_t)0u;
+}
+
+/**
+ * @brief Return the alignment required by a pending-request entry.
+ * @return Required alignment in bytes.
+ */
+static size_t pending_request_alignment(void) {
+  return alignof(corelib_pending_request_t);
+}
+
+/**
  * @brief Pending at.
  * @param[in,out] context Corelib context used by the operation.
  * @param[in] index Bounded storage index.
@@ -613,8 +641,9 @@ static corelib_status_t accept_fragment(corelib_context_t *context, const coreli
   if (entry == NULL) {
     return CORELIB_CAPACITY_EXCEEDED;
   }
-  message = &context->config.storage.reassembly.message[slot_index * context->config.storage.maximum_message_size];
-  received = &context->config.storage.reassembly.received[slot_index * 255u];
+  message = device_byte_at(context->config.storage.reassembly.message,
+                           slot_index * context->config.storage.maximum_message_size);
+  received = device_byte_at(context->config.storage.reassembly.received, slot_index * 255u);
   if (!entry->used) {
     (void)memset(entry, 0, sizeof(*entry));
     entry->used = true;
@@ -676,10 +705,11 @@ size_t corelib_pending_request_entry_size(void) {
 }
 
 corelib_status_t corelib_init(void *context_memory, size_t context_memory_size, const corelib_config_t *config, corelib_context_t **context) {
+  const size_t pending_alignment = pending_request_alignment();
   corelib_context_t *created;
   if (context_memory == NULL || config == NULL || context == NULL ||
       context_memory_size < sizeof(corelib_context_t) ||
-      (uintptr_t)context_memory % alignof(corelib_context_t) != 0u ||
+      !device_pointer_is_aligned(context_memory, corelib_context_alignment()) ||
       config->callbacks.send_frame == NULL || config->storage.reassembly.message == NULL ||
       config->storage.reassembly.received == NULL || config->storage.transaction_scratch == NULL ||
       config->storage.outbound.frames == NULL ||
@@ -692,8 +722,8 @@ corelib_status_t corelib_init(void *context_memory, size_t context_memory_size, 
       config->storage.outbound.capacity > CORELIB_MAX_OUTBOUND_FRAMES ||
       config->storage.pending_requests.capacity == 0u ||
       config->storage.pending_requests.entry_size < sizeof(corelib_pending_request_t) ||
-      (uintptr_t)config->storage.pending_requests.entries % alignof(corelib_pending_request_t) != 0u ||
-      config->storage.pending_requests.entry_size % alignof(corelib_pending_request_t) != 0u ||
+      !device_pointer_is_aligned(config->storage.pending_requests.entries, pending_alignment) ||
+      (config->storage.pending_requests.entry_size % pending_alignment) != 0u ||
       config->maximum_transaction_data_size < CORELIB_MIN_TRANSACTION_DATA_SIZE ||
       config->maximum_transaction_data_size > config->storage.maximum_message_size - 19u ||
       config->heartbeat_interval_ms < 100u || config->heartbeat_interval_ms > 60000u ||

@@ -154,9 +154,29 @@ _Static_assert(sizeof(corelib_gateway_context_t) <=
  * @param[in] index Bounded storage index.
  * @return Matching internal entry, or null when none is available.
  */
-static void *entry_at(const corelib_entry_storage_t *storage, size_t index) {
+static void *entry_at(corelib_entry_storage_t *storage, size_t index) {
   uint8_t *entries = (uint8_t *)storage->entries;
   return (void *)&entries[index * storage->entry_size];
+}
+
+/**
+ * @brief Address a byte within caller-owned storage.
+ * @param[in,out] base Start of the validated storage region.
+ * @param[in] offset Bounded byte offset within the region.
+ * @return Address of the selected byte.
+ */
+static uint8_t *gateway_byte_at(uint8_t *base, size_t offset) {
+  return &base[offset];
+}
+
+/**
+ * @brief Test whether caller-owned storage meets an alignment requirement.
+ * @param[in] memory Storage address to test.
+ * @param[in] alignment Required power-of-two alignment.
+ * @return True when the address is suitably aligned; otherwise false.
+ */
+static bool gateway_pointer_is_aligned(const void *memory, size_t alignment) {
+  return ((uintptr_t)memory % (uintptr_t)alignment) == (uintptr_t)0u;
 }
 
 /**
@@ -1285,8 +1305,9 @@ static corelib_status_t accept_control_fragment(corelib_gateway_context_t *g, co
   if (assembly == NULL || frame->message_length > g->config.storage.maximum_control_message_size) {
     return CORELIB_CAPACITY_EXCEEDED;
   }
-  message = &g->config.storage.control_reassembly.message[slot * g->config.storage.maximum_control_message_size];
-  received = &g->config.storage.control_reassembly.received[slot * 255u];
+  message = gateway_byte_at(g->config.storage.control_reassembly.message,
+                            slot * g->config.storage.maximum_control_message_size);
+  received = gateway_byte_at(g->config.storage.control_reassembly.received, slot * 255u);
   if (!assembly->used) {
     (void)memset(assembly, 0, sizeof(*assembly));
     assembly->used = true;
@@ -1418,7 +1439,7 @@ corelib_status_t corelib_gateway_init(void *memory, size_t memory_size, const co
   corelib_config_t local;
   if (memory == NULL || config == NULL || out == NULL ||
       memory_size < sizeof(corelib_gateway_context_t) ||
-      (uintptr_t)memory % alignof(corelib_gateway_context_t) != 0 ||
+      !gateway_pointer_is_aligned(memory, corelib_gateway_context_alignment()) ||
       config->device.callbacks.send_frame == NULL ||
       config->storage.device_context_memory == NULL ||
       !valid_store(&config->storage.links) || !valid_store(&config->storage.routes) ||
@@ -1451,8 +1472,8 @@ corelib_status_t corelib_gateway_init(void *memory, size_t memory_size, const co
   local.callbacks.user = g;
   /* The endpoint initializer normally rejects the gateway bit; it is internal here. */
   local.capabilities &= ~CORELIB_CAPABILITY_GATEWAY;
-  if (corelib_init(config->storage.device_context_memory,
-                   config->storage.device_context_memory_size,
+  if (corelib_init(g->config.storage.device_context_memory,
+                   g->config.storage.device_context_memory_size,
                    &local, &g->device) != CORELIB_OK) {
     return CORELIB_INVALID_ARGUMENT;
   }
