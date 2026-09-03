@@ -60,6 +60,8 @@ def member_entry(node: ET.Element) -> ApiEntry:
             docs = f"{docs}\n\n{suffix}" if docs else suffix
     elif kind == "typedef":
         signature = node_text(node.find("definition"))
+        if signature.startswith("using "):
+            signature = signature.replace(" = typedef ", " = ", 1)
     else:
         definition = node_text(node.find("definition"))
         arguments = node_text(node.find("argsstring"))

@@ -61,6 +61,18 @@ class DocumentationApiTest(unittest.TestCase):
         self.assertEqual(entry.signature, "typedef enum { ... } corelib_status_t")
         self.assertIn("`CORELIB_OK`, `CORELIB_BUSY`", entry.docs)
 
+    def test_normalises_legacy_doxygen_cpp_aliases(self) -> None:
+        node = ET.fromstring(
+            """
+            <memberdef kind="typedef" prot="public">
+              <definition>using corelib::LinkId = typedef corelib_link_id_t</definition>
+              <name>LinkId</name>
+            </memberdef>
+            """
+        )
+        entry = member_entry(node)
+        self.assertEqual(entry.signature, "using corelib::LinkId = corelib_link_id_t")
+
     def test_orders_members_independently_of_xml_sections(self) -> None:
         root = ET.fromstring(
             """
