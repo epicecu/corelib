@@ -1,0 +1,68 @@
+# Generated protocol and vendored Nanopb headers are parsed for type information
+# but are not owned by Corelib and remain outside the analysis baseline.
+*:src/protocol/v2/generated/*
+*:src/vendor/*
+
+# Public declarations and definitions intentionally retain external linkage.
+misra-c2012-2.5:src/corelib/device.h
+misra-c2012-8.7:src/corelib/device.c
+misra-c2012-8.7:src/corelib/gateway.c
+
+# Existing fixed-width protocol arithmetic and serialisation expressions form
+# the reviewed baseline. New rule categories and unsuppressed paths still fail.
+misra-c2012-10.4:src/corelib/gateway.c
+misra-c2012-10.4:src/corelib/device.c
+misra-c2012-10.8:src/corelib/device.c
+misra-c2012-10.8:src/corelib/gateway.c
+misra-c2012-10.8:src/protocol/pfp.c
+misra-c2012-11.5:src/corelib/device.c
+misra-c2012-11.5:src/corelib/gateway.c
+misra-c2012-11.5:src/protocol/transaction.c
+misra-c2012-11.6:src/corelib/device.c
+misra-c2012-11.6:src/corelib/gateway.c
+misra-c2012-11.8:src/corelib/device.c
+misra-c2012-11.8:src/corelib/gateway.c
+misra-c2012-12.1:src/corelib/device.c
+misra-c2012-12.1:src/corelib/gateway.c
+misra-c2012-12.1:src/protocol/pfp.c
+misra-c2012-12.1:src/protocol/transaction.c
+misra-c2012-12.2:src/corelib/device.c
+misra-c2012-12.2:src/corelib/gateway.c
+misra-c2012-12.3:src/corelib/gateway.c
+misra-c2012-13.3:src/corelib/device.c
+misra-c2012-13.3:src/corelib/gateway.c
+misra-c2012-18.4:src/corelib/device.c
+misra-c2012-18.4:src/corelib/gateway.c
+misra-c2012-18.4:src/protocol/pfp.c
+
+# Guard clauses, compact control bodies, bounded routing traversal, consumed
+# return values, and mutable iterator parameters are intentional legacy forms.
+misra-c2012-15.5:src/corelib/device.c
+misra-c2012-15.5:src/corelib/gateway.c
+misra-c2012-15.5:src/protocol/pfp.c
+misra-c2012-15.5:src/protocol/transaction.c
+misra-c2012-15.6:src/corelib/device.c
+misra-c2012-15.6:src/corelib/gateway.c
+misra-c2012-15.6:src/protocol/pfp.c
+misra-c2012-15.6:src/protocol/transaction.c
+misra-c2012-15.7:src/corelib/device.c
+misra-c2012-15.7:src/corelib/gateway.c
+misra-c2012-17.2:src/corelib/gateway.c
+misra-c2012-17.7:src/corelib/device.c
+misra-c2012-17.7:src/corelib/gateway.c
+misra-c2012-17.7:src/protocol/pfp.c
+misra-c2012-17.7:src/protocol/transaction.c
+misra-c2012-17.8:src/corelib/gateway.c
+
+# Cppcheck advisory findings retained in the initial baseline.
+redundantInitialization:src/corelib/device.c
+variableScope:src/corelib/device.c
+constParameterPointer:src/corelib/gateway.c
+constVariablePointer:src/corelib/gateway.c
+knownConditionTrueFalse:src/corelib/gateway.c
+
+# Cppcheck 2.13's MISRA addon cannot resolve the internal opaque-structure
+# typedefs when they are operands of sizeof or alignof. Later versions resolve
+# the same declarations successfully.
+misra-config:src/corelib/device.c
+misra-config:src/corelib/gateway.c

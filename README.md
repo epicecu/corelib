@@ -7,6 +7,7 @@
 </div>
 
 [![CI](https://github.com/epicecu/corelib/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/epicecu/corelib/actions/workflows/ci.yml)
+[![MISRA C Analysis](https://github.com/epicecu/corelib/actions/workflows/misra.yml/badge.svg)](https://github.com/epicecu/corelib/actions/workflows/misra.yml)
 [![Documentation](https://github.com/epicecu/corelib/actions/workflows/docs.yml/badge.svg)](https://epicecu.github.io/corelib/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -156,10 +157,15 @@ task quick                 # Build and run the portable native test suite.
 task check                 # Strict GCC and Clang builds.
 task quality:format-check  # Verify owned-source formatting.
 task quality:docs          # Verify comments and generated API pages.
+task quality:misra         # Analyse the owned C implementation.
 task docs:build            # Build the public documentation site.
 task docs:serve            # Serve documentation at http://localhost:8000.
 task all                   # Run the complete software release gate.
 ```
+
+`task quality:misra` is a blocking Cppcheck regression gate providing partial
+automated MISRA C:2012 coverage. It is not a formal compliance claim; see the
+[analysis scope and accepted findings](docs/misra.md).
 
 ## Compatibility
 

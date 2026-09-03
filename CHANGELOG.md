@@ -2,6 +2,8 @@
 
 ## 1.0.0
 
+- Added a dedicated blocking MISRA C:2012 analysis task, workflow, status
+  badge, and reviewed baseline for the owned C implementation.
 - Renamed the library, C and C++ APIs, CMake package and targets, Arduino
   metadata, examples, and validation tooling to Corelib. Programmor naming is
   retained only for the supported wire protocols and external integration.

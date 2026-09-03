@@ -31,6 +31,7 @@ vars:
   BUILD_DIR: '{{default "build" .BUILD_DIR}}'
   CC: '{{default "cc" .CC}}'
   CXX: '{{default "c++" .CXX}}'
+  CPPCHECK: '{{default "cppcheck" .CPPCHECK}}'
   PYTHON: '{{default "python3" .PYTHON}}'
   ARDUINO_CLI: '{{default "build/tooling/arduino-cli" .ARDUINO_CLI}}'
   ARDUINO_LINT: '{{default "arduino-lint" .ARDUINO_LINT}}'
@@ -52,6 +53,7 @@ tasks:
       - '{{.CC}} --version'
       - '{{.CXX}} --version'
       - ctest --version
+      - '{{.CPPCHECK}} --version'
 
   quick:
     desc: Configure, build, and test the portable Corelib
@@ -73,6 +75,7 @@ tasks:
     cmds:
       - task: quality:format-check
       - task: quality:docs
+      - task: quality:misra
       - task: docs:versions:check
       - task: docs:build
       - task: native:check
