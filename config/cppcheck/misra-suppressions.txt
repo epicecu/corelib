@@ -11,6 +11,7 @@ misra-c2012-8.7:src/corelib/gateway.c
 # Existing fixed-width protocol arithmetic and serialisation expressions form
 # the reviewed baseline. New rule categories and unsuppressed paths still fail.
 misra-c2012-10.4:src/corelib/gateway.c
+misra-c2012-10.4:src/corelib/device.c
 misra-c2012-10.8:src/corelib/device.c
 misra-c2012-10.8:src/corelib/gateway.c
 misra-c2012-10.8:src/protocol/pfp.c
@@ -59,3 +60,9 @@ variableScope:src/corelib/device.c
 constParameterPointer:src/corelib/gateway.c
 constVariablePointer:src/corelib/gateway.c
 knownConditionTrueFalse:src/corelib/gateway.c
+
+# Cppcheck 2.13's MISRA addon cannot resolve the internal opaque-structure
+# typedefs when they are operands of sizeof or alignof. Later versions resolve
+# the same declarations successfully.
+misra-config:src/corelib/device.c
+misra-config:src/corelib/gateway.c

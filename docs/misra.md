@@ -39,6 +39,10 @@ The initial regression baseline in
   side effects, and selected parameters act as local iterators.
 - A small set of Cppcheck advisory findings is retained where const or scope
   changes would not alter the current safety boundary.
+- Cppcheck 2.13 cannot resolve Corelib's internal opaque-structure typedefs in
+  several `sizeof` and `alignof` expressions. These `misra-config` diagnostics
+  are suppressed for the two affected implementation files; newer Cppcheck
+  versions resolve the declarations correctly.
 
 Generated and vendored paths are excluded wholesale because their sources are
 maintained by their respective generators or upstream projects.
