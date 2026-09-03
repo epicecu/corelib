@@ -1,16 +1,19 @@
 <div align="center">
 
-<img src="docs/images/corelib-logo.png" alt="EpicECU Corelib" width="400" />
+<img src="docs/public/corelib-logo.png" alt="EpicECU Corelib" width="400" />
 
 ##### Portable C11 middleware for Programmor-compatible microcontroller devices
 
 </div>
 
 [![CI](https://github.com/epicecu/corelib/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/epicecu/corelib/actions/workflows/ci.yml)
+[![Documentation](https://github.com/epicecu/corelib/actions/workflows/docs.yml/badge.svg)](https://epicecu.github.io/corelib/)
 
-Version 0.1.0 implements Programmor Frame Protocol (PFP) v1 and Transaction
+Version 1.0.0 implements Portable Frame Protocol (PFP) v1 and Transaction
 Protocol v2 for Arduino, bare-metal firmware, and MCU projects with an
 application-controlled scheduler.
+
+Documentation: https://epicecu.github.io/corelib/
 
 The core has no heap, hardware abstraction layer, scheduler, filesystem,
 network stack, or background-work dependency. It receives and emits complete
@@ -67,7 +70,29 @@ Framework-neutral consumers may include the role-specific API directly:
 The source conventions and documentation policy are defined in
 [`docs/style.md`](docs/style.md).
 
-## Quick start: Arduino/C++
+## Quick start: C
+
+The C11 API is the canonical integration path. Firmware supplies fixed storage,
+callbacks, a transport link, and a monotonic clock:
+
+```c
+#include <corelib/device.h>
+
+corelib_config_t config = {0};
+corelib_context_t *device = NULL;
+
+/* Bind the caller-owned storage and callbacks described in the C guide. */
+configure_corelib(&config);
+if (corelib_init(context_memory, sizeof(context_memory), &config, &device) ==
+    CORELIB_OK) {
+  (void)corelib_add_link(device, 1u, &transport);
+}
+```
+
+See the complete [C Device integration guide](docs/device.md) for storage,
+callback, transaction, and scheduling details.
+
+### C++ and Arduino example
 
 The C++ facade owns Corelib's fixed storage, so a small Arduino application can
 be integrated without heap allocation. This complete example uses `Serial` as
@@ -153,7 +178,7 @@ Your transport may be UART, USB CDC, HID, or another packet link, but it must
 deliver and accept complete 64-byte frames. Production firmware must also use a
 persistent UUIDv4 and pass a non-decreasing monotonic time to `receive()` and
 `tick()`. See the complete [`DeviceSerial`](examples/DeviceSerial) sketch and
-the [integration](docs/integration.md) and [concurrency](docs/concurrency.md)
+the [Device](docs/device.md) and [transport](docs/transport.md)
 guides when adapting the example to a real device.
 
 ## Build and validate
@@ -167,6 +192,8 @@ task check  # Build with strict GCC and Clang warnings.
 task quality:format CLANG_FORMAT=clang-format-18
 task quality:format-check CLANG_FORMAT=clang-format-18
 task quality:docs
+task docs:build  # Build the public site for this checkout.
+task docs:serve  # Serve it locally at http://localhost:8000.
 ```
 
 Tasks are grouped by purpose under `native:`, `protocol:`, `package:`,
@@ -281,10 +308,11 @@ device transport -> Corelib -> device transaction handler
 device transport <- Corelib <- response or publication
 ```
 
-See [integration](docs/integration.md) and
-[concurrency](docs/concurrency.md) for the complete ownership contract.
-The [C++ and Arduino guide](docs/cpp.md) documents ETL setup, typed callbacks,
-fixed-storage sizing, and facade lifetime rules.
+See the [Device](docs/device.md) and
+[transport](docs/transport.md) guides for the complete ownership contract.
+The [C++ guide](docs/cpp.md) documents ETL setup, typed callbacks,
+fixed-storage sizing, and facade lifetime rules. Arduino packaging is covered
+separately in the [Arduino guide](docs/arduino.md).
 
 An RP2040 Pico SDK 2.3.0/TinyUSB hardware fixture is available under
 [`tests/hardware/pico-hid`](tests/hardware/pico-hid). It runs an on-device Corelib
@@ -318,15 +346,18 @@ bytes and `255 * slot_count` fragment markers. Outbound storage requires
 
 ## Compatibility
 
-| Corelib | PFP | Transaction | C | Optional C++ facade |
+| Corelib | Portable Frame Protocol | Transaction Protocol | C | Optional C++ facade |
 | --- | --- | --- | --- | --- |
-| 0.1.0 | 1 | 2 | C11 | C++14 with ETL 20.x |
+| 1.0.x | 1 | 2 | C11 | C++14 with ETL 20.x |
 
-Version 0.1.0 provides the standard-node core and the separately enabled
+Version 1.0.0 provides the standard-node core and the separately enabled
 portable gateway component. Native verification uses GCC and Clang; package
 builds cover Arduino/Teensy, Raspberry Pi Pico SDK, and STM32Cube integrations.
-The legacy `Comm`-based Corelib API is a migration reference, not a compatibility
-constraint.
+
+The published documentation uses `main` as **Latest**. Numeric stable SemVer
+tags are published separately, retaining the newest patch from every minor
+release line. Versioned publishing begins with the first tag containing the
+VitePress documentation toolchain; older tags are not backfilled.
 
 ## License
 

@@ -1,0 +1,69 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    tags: ['*.*.*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'main' }}
+          fetch-depth: 0
+      - uses: arduino/setup-task@v3
+        with:
+          version: 3.52.0
+          repo-token: ${{ github.token }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y doxygen
+      - run: npm ci
+      - run: task docs:versions:check
+      - if: github.event_name == 'pull_request'
+        run: task docs:build DOCS_BASE=/corelib/
+        env:
+          CORELIB_DOCS_VERSION: Latest
+          CORELIB_DOCS_SOURCE_REF: main
+          CORELIB_DOCS_VERSIONS: '[{"label":"Latest","url":"https://epicecu.github.io/corelib/"}]'
+      - if: github.event_name != 'pull_request'
+        run: task docs:versions:build DOCS_SITE_ORIGIN=https://epicecu.github.io DOCS_PROJECT_BASE=/corelib/
+      - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          path: build/docs/site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

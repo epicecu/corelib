@@ -112,7 +112,9 @@ TEST(DeviceCppFacade, ProvidesFixedStorageAndOperationParity) {
   EXPECT_TRUE(device.get() == device.nativeHandle());
 
   const corelib::Version version = device.version();
-  EXPECT_TRUE(version.pfp_version == 1u && version.transaction_version == 2u);
+  EXPECT_TRUE(version.major == 1u && version.minor == 0u &&
+              version.patch == 0u && version.pfp_version == 1u &&
+              version.transaction_version == 2u);
   corelib::Limits limits{};
   EXPECT_TRUE(device.limits(limits) == corelib::Status::Ok);
   EXPECT_TRUE(limits.maximum_message_size == 256u);
