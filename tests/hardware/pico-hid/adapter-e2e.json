@@ -24,7 +24,7 @@
     },
     "request-common": {
       "send": {"type": "request", "name": "message.request", "id": {"$generate": "uuid4", "as": "common_request_id"}, "data": {"nodeId": {"$ref": "node_id"}, "kind": "common", "shareId": 1, "timeoutMs": 1000}},
-      "response": [{"name": "message.request", "id": {"$ref": "common_request_id"}}, {"name": "message.received", "data": {"nodeId": {"$ref": "node_id"}, "kind": "common", "shareId": 1, "result": "success", "correlationStatus": "matched", "payload": "DQIAAAAV6QMAAB17AAAAJQEAAAAtRBYDADINVGVzdCBEZXZpY2UgQQ", "checksum": "550c33790d2e2291f3aba23a2be29a4a5eb2e1649cd40e49acf43645806d6100"}}]
+      "response": [{"name": "message.request", "id": {"$ref": "common_request_id"}}, {"name": "message.received", "data": {"nodeId": {"$ref": "node_id"}, "kind": "common", "shareId": 1, "result": "success", "correlationStatus": "matched", "payload": "DQIAAAAVAQAAAB17AAAALUQWAwAyDVRlc3QgRGV2aWNlIEE", "checksum": "4d24d856bc85cb89afe90f071aed0b1df70937710cd1f6df2aa2b1c6bf3c2cb7"}}]
     },
     "request-share-four": {
       "send": {"type": "request", "name": "message.request", "id": {"$generate": "uuid4", "as": "share_request_id"}, "data": {"nodeId": {"$ref": "node_id"}, "kind": "share", "shareId": 4, "timeoutMs": 1000}},

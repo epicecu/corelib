@@ -29,9 +29,9 @@ void corelib_test_device_init(corelib_test_device_t *device,
   if (device == NULL) return;
   memset(device, 0, sizeof(*device));
   device->common.id = 2u;
-  device->common.registry_id = 1001u;
+  device->common.registry_id = 1u;
   device->common.serial_number = 123u;
-  device->common.shares_version = 1u;
+  device->common.shares_version = 0u;
   device->common.firmware_version = 202308u;
   strcpy(device->common.device_name, "Test Device A");
   device->share1.ending_number = 20;
