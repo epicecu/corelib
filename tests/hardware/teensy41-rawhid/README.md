@@ -3,6 +3,8 @@
 This fixture runs the same deterministic Common/Share model and public Corelib
 self-test as the Pico fixture. It uses Teensyduino RawHID (`16c0:0486`) with
 64-byte reports and is built with Arduino CLI and the pinned Teensy core.
+It reports development config identity `1/0`; the official Config 1001 firmware
+lives in `epicecu/test-device`.
 
 For a fresh clone, follow the root
 [Teensy testing walkthrough](../../../README.md#test-with-a-teensy-41). The
