@@ -235,6 +235,36 @@ TEST(DeviceCApi, HandlesSessionTransactionsAndReassembly) {
   EXPECT_TRUE(corelib_tick(device, 2001u) == CORELIB_OK);
   EXPECT_TRUE(fixture.frame_count == 5u);
   EXPECT_TRUE(fixture.frames[4][0] == CORELIB_PFP_CONTROL);
+
+  /* A new root may recover an attached device after the previous host exits
+   * without delivering SessionEnd. A valid probe authorises exactly the next
+   * replacement SessionStart; unsolicited replacement sessions stay rejected. */
+  memset(&frame, 0, sizeof(frame));
+  frame.type = CORELIB_PFP_PROBE_REQUEST;
+  frame.source = 1u;
+  frame.message_id = 12u;
+  frame.frame_index = 1u;
+  frame.frame_count = 1u;
+  frame.hop_limit = 1u;
+  EXPECT_TRUE(corelib_pfp_encode(&frame, bytes) == CORELIB_OK);
+  EXPECT_TRUE(corelib_receive_frame(device, 1u, bytes, 2002u) == CORELIB_OK);
+  EXPECT_TRUE(fixture.frame_count == 6u && fixture.frames[5][0] == CORELIB_PFP_PROBE_RESPONSE);
+
+  memset(&frame, 0, sizeof(frame));
+  frame.type = CORELIB_PFP_CONTROL;
+  frame.source = 1u;
+  frame.destination = 2u;
+  frame.session_id = 0x11223344u;
+  frame.message_id = 13u;
+  frame.frame_index = 1u;
+  frame.frame_count = 1u;
+  frame.message_length = 14u;
+  frame.hop_limit = 1u;
+  frame.priority = 3u;
+  memcpy(frame.payload, control, 14u);
+  EXPECT_TRUE(corelib_pfp_encode(&frame, bytes) == CORELIB_OK);
+  EXPECT_TRUE(corelib_receive_frame(device, 1u, bytes, 2003u) == CORELIB_OK);
+  EXPECT_TRUE(fixture.frame_count == 7u && fixture.frames[6][0] == CORELIB_PFP_CONTROL);
 }
 
 TEST(DeviceCApi, ReportsDocumentedNullContextStatuses) {

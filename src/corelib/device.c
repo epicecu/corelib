@@ -117,6 +117,7 @@ static void clear_protocol_state(corelib_context_t *context, bool notify) {
   context->session_id = 0u;
   context->local_address = 0u;
   context->session_state = CORELIB_SESSION_INACTIVE;
+  context->session_takeover_allowed = false;
   context->outbound_head = 0u;
   context->outbound_count = 0u;
   (void)memset(context->reassembly, 0, sizeof(context->reassembly));
@@ -460,10 +461,6 @@ corelib_status_t corelib_process_control_message(corelib_context_t *context, con
                               (uint16_t)((uint16_t)1u << TLV_HEARTBEAT_INTERVAL), 0u)) {
       return CORELIB_INVALID_FRAME;
     }
-    if (context->session_state != CORELIB_SESSION_INACTIVE &&
-        context->session_id != frame_session) {
-      return CORELIB_INVALID_STATE;
-    }
     if (!control_tlv(bytes, size, TLV_HEARTBEAT_INTERVAL, &value, &value_size) ||
         value_size != 4u) {
       return CORELIB_INVALID_FRAME;
@@ -472,6 +469,14 @@ corelib_status_t corelib_process_control_message(corelib_context_t *context, con
     if (heartbeat < 100u || heartbeat > 60000u) {
       return CORELIB_INVALID_FRAME;
     }
+    if (context->session_state != CORELIB_SESSION_INACTIVE &&
+        context->session_id != frame_session) {
+      if (!context->session_takeover_allowed) {
+        return CORELIB_INVALID_STATE;
+      }
+      clear_protocol_state(context, true);
+    }
+    context->session_takeover_allowed = false;
     context->session_id = frame_session;
     context->local_address = CORELIB_DIRECT_NODE_ADDRESS;
     context->session_state = CORELIB_SESSION_ACTIVE;
@@ -849,6 +854,9 @@ corelib_status_t corelib_receive_frame(corelib_context_t *context, corelib_link_
   if (frame.type == CORELIB_PFP_PROBE_REQUEST && frame.destination == 0u &&
       frame.source == CORELIB_ROOT_ADDRESS) {
     status = send_probe_response(context, frame.message_id);
+    if (status == CORELIB_OK) {
+      context->session_takeover_allowed = true;
+    }
   } else if (frame.destination != context->local_address &&
              !(context->session_state == CORELIB_SESSION_INACTIVE &&
                (frame.destination == 0u ||

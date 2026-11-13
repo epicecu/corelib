@@ -77,6 +77,7 @@ struct corelib_context {
   void *transport_context;
   bool link_active;
   bool in_call;
+  bool session_takeover_allowed;
   uint64_t now_ms;
   uint32_t session_id;
   uint32_t next_message_id;
