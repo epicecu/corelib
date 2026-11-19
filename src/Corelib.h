@@ -6,6 +6,7 @@
 #define CORELIB_DEVICE_ARDUINO_H
 
 #include "corelib/device.h"
+#include "corelib/serial.h"
 
 #ifdef CORELIB_ENABLE_GATEWAY
 #include "corelib/gateway.h"
