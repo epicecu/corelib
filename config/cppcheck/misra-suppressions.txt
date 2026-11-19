@@ -7,6 +7,7 @@
 misra-c2012-2.5:src/corelib/device.h
 misra-c2012-8.7:src/corelib/device.c
 misra-c2012-8.7:src/corelib/gateway.c
+misra-c2012-8.7:src/corelib/serial.c
 
 # Caller-owned fixed storage and Nanopb callback state require conversions
 # between opaque pointers and their validated internal representations.
@@ -21,6 +22,7 @@ misra-c2012-11.6:src/corelib/gateway.c
 # codec and validation structure without changing the evaluated expression.
 misra-c2012-12.1:src/corelib/device.c
 misra-c2012-12.1:src/corelib/gateway.c
+misra-c2012-12.1:src/corelib/serial.c
 misra-c2012-12.1:src/protocol/pfp.c
 misra-c2012-12.1:src/protocol/transaction.c
 
@@ -28,6 +30,7 @@ misra-c2012-12.1:src/protocol/transaction.c
 # inputs cannot reach state changes or caller callbacks.
 misra-c2012-15.5:src/corelib/device.c
 misra-c2012-15.5:src/corelib/gateway.c
+misra-c2012-15.5:src/corelib/serial.c
 misra-c2012-15.5:src/protocol/pfp.c
 misra-c2012-15.5:src/protocol/transaction.c
 

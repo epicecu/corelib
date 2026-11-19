@@ -3,18 +3,20 @@
 
 constexpr corelib_link_id_t kSerialLink = 1;
 
+corelib_serial_decoder_t serial_decoder{};
 uint8_t incoming_frame[CORELIB_FRAME_SIZE];
-size_t incoming_size = 0;
 bool response_pending = false;
 corelib::TransactionId pending_request{};
 
 class DeviceHandler final : public corelib::Handler {
 public:
   corelib::SendResult sendFrame(corelib::LinkId, void *, corelib::FrameView frame) override {
-    if (static_cast<size_t>(Serial.availableForWrite()) < frame.size()) {
+    uint8_t encoded[CORELIB_SERIAL_WIRE_SIZE];
+    const size_t encoded_size = corelib_serial_encode(frame.data(), encoded);
+    if (encoded_size == 0 || static_cast<size_t>(Serial.availableForWrite()) < encoded_size) {
       return corelib::SendResult::Busy;
     }
-    return Serial.write(frame.data(), frame.size()) == frame.size()
+    return Serial.write(encoded, encoded_size) == encoded_size
                ? corelib::SendResult::Accepted
                : corelib::SendResult::Failed;
   }
@@ -46,16 +48,15 @@ void setup() {
 }
 
 void loop() {
-  while (Serial.available() > 0 && incoming_size < sizeof(incoming_frame)) {
+  while (Serial.available() > 0) {
     const int value = Serial.read();
     if (value >= 0) {
-      incoming_frame[incoming_size++] = static_cast<uint8_t>(value);
+      const corelib_serial_result_t result =
+          corelib_serial_decoder_push(&serial_decoder, static_cast<uint8_t>(value), incoming_frame);
+      if (result == CORELIB_SERIAL_FRAME) {
+        (void)device.receive(kSerialLink, incoming_frame, millis());
+      }
     }
-  }
-
-  if (incoming_size == sizeof(incoming_frame)) {
-    (void)device.receive(kSerialLink, incoming_frame, millis());
-    incoming_size = 0;
   }
 
   if (response_pending) {

@@ -1,4 +1,5 @@
 extern "C" {
+#include "corelib/serial.h"
 #include "internal/corelib_internal.h"
 }
 
@@ -43,6 +44,59 @@ void expectInvalid(const corelib_pfp_frame_t &frame) {
 }
 
 } // namespace
+
+TEST(SerialFraming, RoundTripsZeroHeavyFramesAndIgnoresEmptyDelimiters) {
+  std::array<uint8_t, CORELIB_FRAME_SIZE> frame{};
+  std::array<uint8_t, CORELIB_SERIAL_WIRE_SIZE> encoded{};
+  std::array<uint8_t, CORELIB_FRAME_SIZE> decoded{};
+  corelib_serial_decoder_t decoder{};
+  frame[1] = 0x11u;
+  frame[32] = 0x22u;
+  frame[63] = 0x33u;
+  const size_t size = corelib_serial_encode(frame.data(), encoded.data());
+  ASSERT_GT(size, 1u);
+  ASSERT_LE(size, encoded.size());
+  EXPECT_EQ(encoded[size - 1u], 0u);
+  EXPECT_EQ(corelib_serial_decoder_push(&decoder, 0u, decoded.data()), CORELIB_SERIAL_INCOMPLETE);
+  for (size_t index = 0u; index + 1u < size; ++index) {
+    EXPECT_EQ(corelib_serial_decoder_push(&decoder, encoded[index], decoded.data()), CORELIB_SERIAL_INCOMPLETE);
+  }
+  EXPECT_EQ(corelib_serial_decoder_push(&decoder, 0u, decoded.data()), CORELIB_SERIAL_FRAME);
+  EXPECT_EQ(decoded, frame);
+}
+
+TEST(SerialFraming, RejectsMalformedAndOversizedPacketsThenRecovers) {
+  corelib_serial_decoder_t decoder{};
+  std::array<uint8_t, CORELIB_FRAME_SIZE> decoded{};
+  EXPECT_EQ(corelib_serial_decoder_push(&decoder, 3u, decoded.data()), CORELIB_SERIAL_INCOMPLETE);
+  EXPECT_EQ(corelib_serial_decoder_push(&decoder, 1u, decoded.data()), CORELIB_SERIAL_INCOMPLETE);
+  EXPECT_EQ(corelib_serial_decoder_push(&decoder, 0u, decoded.data()), CORELIB_SERIAL_INVALID);
+  for (size_t index = 0u; index <= CORELIB_SERIAL_PACKET_SIZE; ++index) {
+    EXPECT_EQ(corelib_serial_decoder_push(&decoder, 1u, decoded.data()), CORELIB_SERIAL_INCOMPLETE);
+  }
+  EXPECT_EQ(corelib_serial_decoder_push(&decoder, 0u, decoded.data()), CORELIB_SERIAL_INVALID);
+
+  std::array<uint8_t, CORELIB_FRAME_SIZE> frame{};
+  std::array<uint8_t, CORELIB_SERIAL_WIRE_SIZE> encoded{};
+  frame.fill(0x5au);
+  const size_t size = corelib_serial_encode(frame.data(), encoded.data());
+  for (size_t index = 0u; index < size; ++index) {
+    const corelib_serial_result_t expected = index + 1u == size ? CORELIB_SERIAL_FRAME : CORELIB_SERIAL_INCOMPLETE;
+    EXPECT_EQ(corelib_serial_decoder_push(&decoder, encoded[index], decoded.data()), expected);
+  }
+  EXPECT_EQ(decoded, frame);
+}
+
+TEST(SerialFraming, RejectsNullPointers) {
+  std::array<uint8_t, CORELIB_FRAME_SIZE> frame{};
+  std::array<uint8_t, CORELIB_SERIAL_WIRE_SIZE> encoded{};
+  corelib_serial_decoder_t decoder{};
+  EXPECT_EQ(corelib_serial_encode(nullptr, encoded.data()), 0u);
+  EXPECT_EQ(corelib_serial_encode(frame.data(), nullptr), 0u);
+  EXPECT_EQ(corelib_serial_decoder_push(nullptr, 0u, frame.data()), CORELIB_SERIAL_INVALID);
+  EXPECT_EQ(corelib_serial_decoder_push(&decoder, 0u, nullptr), CORELIB_SERIAL_INVALID);
+  corelib_serial_decoder_reset(nullptr);
+}
 
 TEST(PfpValidation, RejectsInvalidCommonFields) {
   corelib_pfp_frame_t frame = dataFrame();

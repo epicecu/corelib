@@ -24,6 +24,7 @@ endif()
 
 add_library(corelib_device
   src/corelib/device.c
+  src/corelib/serial.c
   src/protocol/pfp.c
   src/protocol/transaction.c
   src/protocol/v2/generated/transaction.pb.c
